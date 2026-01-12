@@ -8,11 +8,11 @@ AI-powered academic writing assistant for LaTeX papers.
 bun install
 ```
 
-Set environment variables:
-```bash
-export OPENAI_API_KEY="your-api-key"
-export OPENAI_BASE_URL="https://api.openai.com/v1"  # or compatible API
-export OPENAI_MODEL="gpt-4o"  # optional
+Create `.env` file:
+```
+OPENAI_API_KEY=your-api-key
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4o
 ```
 
 ## Commands
