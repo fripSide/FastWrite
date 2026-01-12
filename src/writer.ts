@@ -125,7 +125,7 @@ export class AcademicWritingHelper {
     }
   }
 
-  async processSection(sectionId: number, apiKey?: string, verbose?: boolean): Promise<string> {
+  async processSection(sectionId: number, verbose?: boolean): Promise<string> {
     this.ensureProjectDirectories();
     const project = this.requireProject();
 
@@ -143,7 +143,6 @@ export class AcademicWritingHelper {
     const newLatex = await this.generateNewContent({
       originalLatex,
       userPrompt,
-      apiKey,
       verbose
     });
     writeFileSync(sourcePath, newLatex, "utf-8");
@@ -189,17 +188,15 @@ export class AcademicWritingHelper {
   private async generateNewContent(input: {
     originalLatex: string;
     userPrompt: string;
-    apiKey?: string;
     verbose?: boolean;
   }): Promise<string> {
-    const effectiveApiKey = input.apiKey || API_KEY;
-    if (!effectiveApiKey) return input.originalLatex;
+    if (!API_KEY) return input.originalLatex;
 
     // Strip /chat/completions from URL (OpenAI client adds it)
     const baseURL = API_BASE_URL.replace(/\/chat\/completions\/?$/, "");
     
     const client = new OpenAI({
-      apiKey: effectiveApiKey,
+      apiKey: API_KEY,
       baseURL
     });
 

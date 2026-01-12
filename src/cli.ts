@@ -71,15 +71,14 @@ program
   .alias("w")
   .description("Rewrite a section using LLM based on the prompt requirements, then generate an HTML diff")
   .argument("<section-id>", "Section ID to write (e.g., 0 targets 0-*.tex)")
-  .option("-k, --api-key <key>", "LLM API key (overrides OPENAI_API_KEY env var)")
   .option("-v, --verbose", "Print system prompt and user content")
-  .action(async (sectionId: string, options: { apiKey?: string; verbose?: boolean }) => {
+  .action(async (sectionId: string, options: { verbose?: boolean }) => {
     try {
       const id = Number.parseInt(sectionId, 10);
       if (Number.isNaN(id)) throw new Error("Invalid section ID");
 
       const helper = new AcademicWritingHelper();
-      const diffPath = await helper.processSection(id, options.apiKey, options.verbose);
+      const diffPath = await helper.processSection(id, options.verbose);
       console.log("Section written successfully!");
       console.log(`Diff: ${diffPath}`);
     } catch (error) {

@@ -95,21 +95,20 @@ export function generateSentenceDiff(originalSentences: string[], newSentences: 
 }
 
 export function escapeHtml(text: string): string {
-  let escaped = text
+  return text
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
-
-  return removeLatexSymbols(escaped);
 }
 
 export function removeLatexSymbols(text: string): string {
   return text
-    .replace(/\\begin\{[^}]+\}[\s\S]*?\\end\{[^}]+\}/g, '')  // environments
-    .replace(/\\[a-zA-Z]+\{[^}]*\}/g, '')                     // commands with args
-    .replace(/\\[a-zA-Z]+(\s|$)/gm, '')                       // commands without args
+    .replace(/\\begin\{[^}]+\}/g, '')                         // \begin{...} tags only
+    .replace(/\\end\{[^}]+\}/g, '')                           // \end{...} tags only
+    .replace(/\\[a-zA-Z]+\{([^}]*)\}/g, '$1')                 // commands with args: keep content
+    .replace(/\\[a-zA-Z]+(\s|$)/gm, ' ')                      // commands without args
     .replace(/[\\$%_{}~&#@^]/g, '')                           // special chars
     .replace(/\s+/g, ' ')
     .trim();
