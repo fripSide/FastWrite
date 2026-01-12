@@ -5,18 +5,29 @@ function removeLatexComments(text: string): string {
 }
 
 export function splitIntoSentences(text: string): string[] {
-  const sentences: string[] = [];
   const textWithoutComments = removeLatexComments(text);
   const cleanedText = removeLatexSymbols(textWithoutComments);
+  
+  // Normalize whitespace
+  let normalized = cleanedText.replace(/\s+/g, ' ').trim();
+  if (!normalized) return [];
 
-  const sentenceRegex = /([^.!?]+[.!?]+|[^.!?]+$)/g;
-  let match;
-  while ((match = sentenceRegex.exec(cleanedText)) !== null) {
-    const sentence = match[0].trim();
-    if (sentence) {
-      sentences.push(sentence);
-    }
-  }
+  // Protect abbreviations by replacing dots with placeholder
+  // Pattern: letter(s) + optional space + dot → replace dot with §
+  normalized = normalized
+    .replace(/\b(e)\s*\.\s*(g)\s*\./gi, '$1§$2§')     // e.g.
+    .replace(/\b(i)\s*\.\s*(e)\s*\./gi, '$1§$2§')     // i.e.
+    .replace(/\b(et)\s+(al)\s*\./gi, '$1 $2§')        // et al.
+    .replace(/\b(etc)\s*\./gi, '$1§')                  // etc.
+    .replace(/\b(vs)\s*\./gi, '$1§')                   // vs.
+    .replace(/\b(Dr|Mr|Ms|Prof|Fig|Eq|Sec|Ref)\s*\./gi, '$1§'); // titles
+
+  // Split on sentence-ending punctuation followed by space and capital letter
+  const sentences = normalized
+    .split(/(?<=[.!?])\s+(?=[A-Z])/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0)
+    .map(s => s.replace(/§/g, '.'));  // Restore dots
 
   return sentences;
 }
