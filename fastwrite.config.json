@@ -1,0 +1,13 @@
+{
+  "current_project": "first",
+  "projects": {
+    "default": {
+      "sections_dir": "sections",
+      "proj_dir": "proj"
+    },
+    "first": {
+      "sections_dir": "/Users/fripside/Dev/FastWrite/sections",
+      "proj_dir": "/Users/fripside/Dev/FastWrite/projs/first"
+    }
+  }
+}

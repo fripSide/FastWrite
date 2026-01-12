@@ -1,0 +1,26 @@
+{
+  "name": "fastwrite",
+  "module": "src/cli.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "helper:prepare": "bun run src/cli.ts prepare",
+    "helper:apply": "bun run src/cli.ts apply",
+    "helper:diff": "bun run src/cli.ts diff",
+    "helper:status": "bun run src/cli.ts status"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "openai": "^4.77.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/diff": "^5.0.8",
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^22.7.4"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}
