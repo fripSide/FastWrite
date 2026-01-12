@@ -4,10 +4,13 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "helper:prepare": "bun run src/cli.ts prepare",
-    "helper:apply": "bun run src/cli.ts apply",
-    "helper:diff": "bun run src/cli.ts diff",
-    "helper:status": "bun run src/cli.ts status"
+    "dev": "bun run src/cli.ts",
+    "build": "bun build src/cli.ts --compile --outfile fastwrite",
+    "build:mac-arm": "bun build src/cli.ts --compile --outfile fastwrite-darwin-arm64 --target bun-darwin-arm64",
+    "build:mac": "bun build src/cli.ts --compile --outfile fastwrite-darwin-x64 --target bun-darwin-x64",
+    "build:linux": "bun build src/cli.ts --compile --outfile fastwrite-linux-x64 --target bun-linux-x64",
+    "build:windows": "bun build src/cli.ts --compile --outfile fastwrite-windows-x64.exe --target bun-windows-x64",
+    "typecheck": "bunx tsc --noEmit"
   },
   "dependencies": {
     "commander": "^12.1.0",

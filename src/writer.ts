@@ -10,11 +10,20 @@ import {
 import { spawn } from "node:child_process";
 import { basename, join } from "node:path";
 import OpenAI from "openai";
-import { API_BASE_URL, API_KEY, API_MODEL } from "./config.js";
 import { escapeHtml, generateSentenceDiff, splitIntoSentences } from "./diffUtils.js";
+
+const API_BASE_URL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
+const API_KEY = process.env.OPENAI_API_KEY || "";
+const API_MODEL = process.env.OPENAI_MODEL || "gpt-4o";
 import { loadProjectConfig, type ProjectConfig } from "./projectConfig.js";
 import { DEFAULT_SYSTEM_PROMPT } from "./systemPrompt.js";
-import type { SectionFile } from "./types.js";
+
+export interface SectionFile {
+  id: number;
+  filename: string;
+  path: string;
+  content: string;
+}
 
 export class AcademicWritingHelper {
   private systemPrompt = "";

@@ -23,5 +23,5 @@ Users can check the modified new section file and the LLM helper should generate
 
 These feature have be done: 
 
-[01-prepare-command.md](01-prepare-command.md)
-[01-write-command.md](01-write-command.md)
+[01-prepare-command.md](01-prepare-command.md)   
+[02-write-command.md](01-write-command.md)

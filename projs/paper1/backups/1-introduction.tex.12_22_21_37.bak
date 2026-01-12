@@ -1,0 +1,9 @@
+\section{Introduction}
+
+Writing high-quality papers for top-tier computer security and systems conferences such as IEEE S\&P, USENIX Security, OSDI, and CCS is challenging.  
+Reviewers demand exceptional clarity, concision, and technical precision.  
+Most researchers lack access to professional editing support.  
+This gap impedes effective scientific communication.  
+We present an AI-assisted writing system that refines language and structure while preserving original technical content.  
+Our system enforces the stylistic and rhetorical conventions of these venues.  
+It enables authors to meet publication standards without specialist editorial input.

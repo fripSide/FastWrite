@@ -100,31 +100,19 @@ program
       return;
     }
 
-    const backupsDir = join(active.project.proj_dir, "backups");
-    const diffsDir = join(active.project.proj_dir, "diffs");
+    const clearDir = (name: string): number => {
+      const dir = join(active.project.proj_dir, name);
+      if (!existsSync(dir)) return 0;
+      const files = readdirSync(dir);
+      files.forEach(f => rmSync(join(dir, f)));
+      return files.length;
+    };
 
-    let backupCount = 0;
-    let diffCount = 0;
-
-    if (existsSync(backupsDir)) {
-      const files = readdirSync(backupsDir);
-      for (const file of files) {
-        rmSync(join(backupsDir, file));
-        backupCount++;
-      }
-    }
-
-    if (existsSync(diffsDir)) {
-      const files = readdirSync(diffsDir);
-      for (const file of files) {
-        rmSync(join(diffsDir, file));
-        diffCount++;
-      }
-    }
+    const backupCount = clearDir("backups");
+    const diffCount = clearDir("diffs");
 
     console.log(`Cleaned project: ${active.name}`);
-    console.log(`  Removed ${backupCount} backup(s)`);
-    console.log(`  Removed ${diffCount} diff(s)`);
+    console.log(`  Removed ${backupCount} backup(s), ${diffCount} diff(s)`);
   });
 
 program.parse();

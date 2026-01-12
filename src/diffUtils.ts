@@ -1,15 +1,7 @@
-import type { DiffItem } from "./types.js";
+export type DiffItem = { type: 'unchanged' | 'added' | 'removed'; text: string };
 
 function removeLatexComments(text: string): string {
-  const lines = text.split('\n');
-  const filteredLines = lines.filter(line => {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('%')) {
-      return false;
-    }
-    return true;
-  });
-  return filteredLines.join('\n');
+  return text.split('\n').filter(line => !line.trim().startsWith('%')).join('\n');
 }
 
 export function splitIntoSentences(text: string): string[] {
@@ -114,26 +106,11 @@ export function escapeHtml(text: string): string {
 }
 
 export function removeLatexSymbols(text: string): string {
-  let result = text;
-
-  result = result.replace(/\\[a-zA-Z]+\{[^}]*\}/g, '');
-  result = result.replace(/\\[a-zA-Z]+\s/g, '');
-  result = result.replace(/\\[a-zA-Z]+$/gm, '');
-  result = result.replace(/\$\$/g, '');
-  result = result.replace(/\$/g, '');
-  result = result.replace(/\\begin\{[^}]+\}[\s\S]*?\\end\{[^}]+\}/g, '');
-  result = result.replace(/\\/g, '');
-  result = result.replace(/%/g, '');
-  result = result.replace(/_/g, '');
-  result = result.replace(/\{/g, '');
-  result = result.replace(/\}/g, '');
-  result = result.replace(/~/g, '');
-  result = result.replace(/&/g, '');
-  result = result.replace(/#/g, '');
-  result = result.replace(/@/g, '');
-  result = result.replace(/\^/g, '');
-
-  result = result.replace(/\s+/g, ' ').trim();
-
-  return result;
+  return text
+    .replace(/\\begin\{[^}]+\}[\s\S]*?\\end\{[^}]+\}/g, '')  // environments
+    .replace(/\\[a-zA-Z]+\{[^}]*\}/g, '')                     // commands with args
+    .replace(/\\[a-zA-Z]+(\s|$)/gm, '')                       // commands without args
+    .replace(/[\\$%_{}~&#@^]/g, '')                           // special chars
+    .replace(/\s+/g, ' ')
+    .trim();
 }
