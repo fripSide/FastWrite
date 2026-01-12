@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 
 export interface ProjectConfig {
   /** Directory containing section LaTeX files like `{id}-{name}.tex` */
@@ -14,7 +14,8 @@ export interface FastWriteConfig {
   projects: Record<string, ProjectConfig>;
 }
 
-const CONFIG_FILE = "fastwrite.config.json";
+const PROJS_DIR = join(process.cwd(), "projs");
+const CONFIG_FILE = join(PROJS_DIR, "fastwrite.config.json");
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -49,26 +50,7 @@ function coerceConfig(raw: unknown): FastWriteConfig {
     return { current_project, projects };
   }
 
-  // v1 (older implementation): { activeProject, projects: {name:{sectionsPath, projDir}} }
-  if ("activeProject" in raw || "projects" in raw) {
-    const activeProject = toStringOrNull(raw["activeProject"]);
-    const projectsRaw = raw["projects"];
-    const projects: Record<string, ProjectConfig> = {};
-
-    if (isRecord(projectsRaw)) {
-      for (const [name, proj] of Object.entries(projectsRaw)) {
-        if (!isRecord(proj)) continue;
-        const sectionsPath = toStringOrNull(proj["sectionsPath"]);
-        const projDir = toStringOrNull(proj["projDir"]);
-        if (!sectionsPath || !projDir) continue;
-        projects[name] = { sections_dir: sectionsPath, proj_dir: projDir };
-      }
-    }
-
-    return { current_project: activeProject, projects };
-  }
-
-  // v0 (repo currently has): { sectionsPath, projDir }
+  // v0 (legacy): { sectionsPath, projDir }
   const sectionsPath = toStringOrNull(raw["sectionsPath"]);
   const projDir = toStringOrNull(raw["projDir"]);
   if (sectionsPath && projDir) {
@@ -98,6 +80,9 @@ export function loadConfig(): FastWriteConfig {
 }
 
 export function saveConfig(config: FastWriteConfig): void {
+  if (!existsSync(PROJS_DIR)) {
+    mkdirSync(PROJS_DIR, { recursive: true });
+  }
   writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8");
 }
 

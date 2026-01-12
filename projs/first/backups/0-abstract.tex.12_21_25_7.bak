@@ -1,3 +1,0 @@
-\begin{abstract}
-We introduce FastWrite, a high-performance AI-driven system that rigorously enhances the quality and professionalism of academic writing through automated analysis of LaTeX documents. FastWrite processes standard scholarly manuscripts in under 200\,ms with negligible computational overhead, significantly improving clarity, concision, and compliance with established academic conventions. Empirical evaluation across 1,200 peer-reviewed manuscripts demonstrates a 37\% average reduction in stylistic ambiguities and a 28\% increase in syntactic precision, establishing FastWrite as an effective tool for refining technical prose while integrating seamlessly into researchers’ existing workflows.
-\end{abstract}

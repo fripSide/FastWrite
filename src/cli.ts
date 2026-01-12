@@ -33,7 +33,8 @@ program
     }
 
     const name = projectName?.trim() || deriveProjectNameFromSectionsDir(absSectionsDir);
-    const projDir = join(dirname(absSectionsDir), "projs", name);
+    // projs dir at current working directory (root)
+    const projDir = join(process.cwd(), "projs", name);
 
     registerProject({ projectName: name, sectionsDir: absSectionsDir, projDir });
 
