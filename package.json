@@ -1,29 +1,35 @@
 {
   "name": "fastwrite",
-  "module": "src/cli.ts",
   "type": "module",
   "private": true,
   "scripts": {
-    "dev": "bun run src/cli.ts",
-    "build": "bun build src/cli.ts --compile --outfile fastwrite",
-    "build:mac-arm": "bun build src/cli.ts --compile --outfile fastwrite-darwin-arm64 --target bun-darwin-arm64",
-    "build:mac": "bun build src/cli.ts --compile --outfile fastwrite-darwin-x64 --target bun-darwin-x64",
-    "build:linux": "bun build src/cli.ts --compile --outfile fastwrite-linux-x64 --target bun-linux-x64",
-    "build:windows": "bun build src/cli.ts --compile --outfile fastwrite-windows-x64.exe --target bun-windows-x64",
-    "typecheck": "bunx tsc --noEmit"
+    "dev": "cd web && bun run build && cd .. && bun run src/server.ts",
+    "dev:watch": "bun run dev:server & cd web && bun run dev",
+    "dev:server": "bun run src/server.ts",
+    "build": "cd web && bun run build",
+    "start": "bun run src/server.ts",
+    "typecheck": "bunx tsc --noEmit",
+    "test": "bunx vitest",
+    "test:watch": "bunx vitest --watch",
+    "test:ui": "bunx vitest --ui"
   },
   "dependencies": {
-    "commander": "^12.1.0",
     "openai": "^4.77.0",
-    "zod": "^3.23.8"
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "lucide-react": "^0.562.0"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.1.18",
     "@types/bun": "latest",
-    "@types/diff": "^5.0.8",
-    "@types/jsdom": "^21.1.7",
-    "@types/node": "^22.7.4"
-  },
-  "peerDependencies": {
-    "typescript": "^5"
+    "@types/node": "^25.0.6",
+    "@types/react": "^19.2.8",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^5.1.2",
+    "@vitest/ui": "^4.0.17",
+    "tailwindcss": "^4.1.18",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.1",
+    "vitest": "^4.0.17"
   }
 }

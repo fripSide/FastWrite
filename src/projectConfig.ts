@@ -1,127 +1,155 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { join, basename } from 'node:path';
+import type { Project, ProjectConfig, SectionNode } from '../web/src/types';
 
-export interface ProjectConfig {
-  /** Directory containing section LaTeX files like `{id}-{name}.tex` */
-  sections_dir: string;
-  /** Workspace directory containing `backups/`, `prompts/`, `diffs/` */
-  proj_dir: string;
+const PROJS_DIR = join(process.cwd(), 'projs');
+const PROJECTS_FILE = join(PROJS_DIR, 'projects.json');
+
+export interface ProjectMetadata {
+  id: string;
+  name: string;
+  type: 'local';
+  localPath: string;
+  createdAt: string;
+  status: 'active' | 'archived';
 }
 
-export interface FastWriteConfig {
-  /** Name of current project */
-  current_project: string | null;
-  projects: Record<string, ProjectConfig>;
+function generateId(): string {
+  return `proj_${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 }
 
-const PROJS_DIR = join(process.cwd(), "projs");
-const CONFIG_FILE = join(PROJS_DIR, "fastwrite.config.json");
-
-type UnknownRecord = Record<string, unknown>;
-
-function isRecord(v: unknown): v is UnknownRecord {
-  return typeof v === "object" && v !== null && !Array.isArray(v);
-}
-
-function toStringOrNull(v: unknown): string | null {
-  return typeof v === "string" && v.trim() ? v : null;
-}
-
-function coerceConfig(raw: unknown): FastWriteConfig {
-  const empty: FastWriteConfig = { current_project: null, projects: {} };
-  if (!isRecord(raw)) return empty;
-
-  // v2 (design spec)
-  if ("current_project" in raw || "projects" in raw) {
-    const current_project = toStringOrNull(raw["current_project"]);
-    const projectsRaw = raw["projects"];
-    const projects: Record<string, ProjectConfig> = {};
-
-    if (isRecord(projectsRaw)) {
-      for (const [name, proj] of Object.entries(projectsRaw)) {
-        if (!isRecord(proj)) continue;
-        const sections_dir = toStringOrNull(proj["sections_dir"]);
-        const proj_dir = toStringOrNull(proj["proj_dir"]);
-        if (!sections_dir || !proj_dir) continue;
-        projects[name] = { sections_dir, proj_dir };
-      }
-    }
-
-    return { current_project, projects };
-  }
-
-  // v0 (legacy): { sectionsPath, projDir }
-  const sectionsPath = toStringOrNull(raw["sectionsPath"]);
-  const projDir = toStringOrNull(raw["projDir"]);
-  if (sectionsPath && projDir) {
-    return {
-      current_project: "default",
-      projects: {
-        default: {
-          sections_dir: sectionsPath,
-          proj_dir: projDir
-        }
-      }
-    };
-  }
-
-  return empty;
-}
-
-export function loadConfig(): FastWriteConfig {
-  if (!existsSync(CONFIG_FILE)) return { current_project: null, projects: {} };
-  try {
-    const content = readFileSync(CONFIG_FILE, "utf-8");
-    return coerceConfig(JSON.parse(content));
-  } catch (error) {
-    console.error(`Error loading config: ${error instanceof Error ? error.message : String(error)}`);
-    return { current_project: null, projects: {} };
-  }
-}
-
-export function saveConfig(config: FastWriteConfig): void {
+export async function loadProjects(): Promise<ProjectMetadata[]> {
   if (!existsSync(PROJS_DIR)) {
     mkdirSync(PROJS_DIR, { recursive: true });
   }
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), "utf-8");
+  
+  if (!existsSync(PROJECTS_FILE)) {
+    writeFileSync(PROJECTS_FILE, '[]', 'utf-8');
+    return [];
+  }
+
+  try {
+    return JSON.parse(readFileSync(PROJECTS_FILE, 'utf-8'));
+  } catch {
+    return [];
+  }
 }
 
-export function deriveProjectNameFromSectionsDir(sectionsDir: string): string {
-  // If sectionsDir = ".../paper/sections", project name = "paper"
-  return basename(dirname(resolve(sectionsDir)));
+async function saveProjects(projects: ProjectMetadata[]): Promise<void> {
+  writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2), 'utf-8');
 }
 
-export function getProjects(): Record<string, ProjectConfig> {
-  return loadConfig().projects;
-}
+export async function createProject(name: string, localPath: string): Promise<ProjectMetadata> {
+  const projects = await loadProjects();
+  
+  const normalizedPath = localPath.replace(/\/+$/, '');
+  const projectName = name || basename(normalizedPath);
+  
+  const existing = projects.find(p => p.localPath.replace(/\/+$/, '') === normalizedPath);
+  if (existing) {
+    await setActiveProject(existing.id);
+    return existing;
+  }
+  
+  if (!existsSync(localPath)) {
+    throw new Error(`Directory does not exist: ${localPath}`);
+  }
+  
+  const stats = statSync(localPath);
+  if (!stats.isDirectory()) {
+    throw new Error(`Path is not a directory: ${localPath}`);
+  }
 
-export function loadProjectConfig(): { name: string; project: ProjectConfig } | null {
-  const cfg = loadConfig();
-  if (!cfg.current_project) return null;
-  const project = cfg.projects[cfg.current_project];
-  if (!project) return null;
-  return { name: cfg.current_project, project };
-}
+  const projectId = generateId();
+  const projectDir = join(PROJS_DIR, projectId);
+  const backupsDir = join(projectDir, 'backups');
+  const aiCacheDir = join(projectDir, 'ai-cache');
+  
+  mkdirSync(projectDir, { recursive: true });
+  mkdirSync(backupsDir, { recursive: true });
+  mkdirSync(aiCacheDir, { recursive: true });
 
-export function registerProject(opts: {
-  projectName: string;
-  sectionsDir: string;
-  projDir: string;
-}): void {
-  const cfg = loadConfig();
-  cfg.projects[opts.projectName] = {
-    sections_dir: resolve(opts.sectionsDir),
-    proj_dir: resolve(opts.projDir)
+  const files = readdirSync(localPath);
+  const texFiles = files.filter(f => f.endsWith('.tex'));
+
+  const config: ProjectConfig = {
+    projectId,
+    sectionsDir: normalizedPath,
+    backupsDir,
+    bibFiles: [],
+    mainFile: texFiles.find(f => ['main.tex', 'paper.tex', 'document.tex'].includes(basename(f)))
   };
-  cfg.current_project = opts.projectName;
-  saveConfig(cfg);
+
+  writeFileSync(join(projectDir, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
+
+  const metadata: ProjectMetadata = {
+    id: projectId,
+    name: projectName,
+    type: 'local',
+    localPath: normalizedPath,
+    createdAt: new Date().toISOString(),
+    status: 'active'
+  };
+
+  // Deactivate other projects
+  const updated: ProjectMetadata[] = projects.map(p => ({ ...p, status: 'archived' as const }));
+  updated.push(metadata);
+  await saveProjects(updated);
+
+  return metadata;
 }
 
-export function switchProject(name: string): ProjectConfig | null {
-  const cfg = loadConfig();
-  const project = cfg.projects[name];
-  if (!project) return null;
-  cfg.current_project = name;
-  saveConfig(cfg);
-  return project;
+export async function getProjectConfig(projectId: string): Promise<ProjectConfig | null> {
+  const configPath = join(PROJS_DIR, projectId, 'config.json');
+  
+  if (!existsSync(configPath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(readFileSync(configPath, 'utf-8'));
+  } catch {
+    return null;
+  }
+}
+
+export async function deleteProject(projectId: string): Promise<boolean> {
+  const projects = await loadProjects();
+  const filtered = projects.filter(p => p.id !== projectId);
+  
+  if (filtered.length === projects.length) {
+    return false;
+  }
+
+  await saveProjects(filtered);
+  
+  try {
+    const projectDir = join(PROJS_DIR, projectId);
+    if (existsSync(projectDir)) {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function setActiveProject(projectId: string): Promise<boolean> {
+  const projects = await loadProjects();
+  const project = projects.find(p => p.id === projectId);
+  
+  if (!project) return false;
+  
+  const updated = projects.map(p => ({
+    ...p,
+    status: (p.id === projectId ? 'active' : 'archived') as 'active' | 'archived'
+  }));
+  
+  await saveProjects(updated);
+  return true;
+}
+
+export async function getActiveProject(): Promise<ProjectMetadata | null> {
+  const projects = await loadProjects();
+  return projects.find(p => p.status === 'active') || null;
 }

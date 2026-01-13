@@ -1,0 +1,307 @@
+import React, { useState, useEffect } from 'react';
+import { ChevronDown, ChevronRight, FileText, Clock, FolderOpen } from 'lucide-react';
+import type { SelectedFile, SelectedProject, ViewMode, TextItem } from '../types';
+import { parseContent } from '../utils/parser';
+import AIEditorPanel from './AIEditorPanel';
+import BackupTimeline from './BackupTimeline';
+import { api } from '../api';
+
+interface MainEditorProps {
+  selectedFile: SelectedFile | null;
+  selectedProject: SelectedProject | null;
+}
+
+const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }) => {
+  const [viewMode, setViewMode] = useState<ViewMode>('section');
+  const [items, setItems] = useState<TextItem[]>([]);
+  const [selectedItem, setSelectedItem] = useState<TextItem | null>(null);
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
+  const [showBackupTimeline, setShowBackupTimeline] = useState(false);
+  const [currentContent, setCurrentContent] = useState<string>('');
+
+  useEffect(() => {
+    if (selectedFile?.content) {
+      const parsed = parseContent(selectedFile.content, viewMode);
+      setItems(parsed);
+      setSelectedItem(null);
+      setCurrentContent(selectedFile.content);
+    }
+  }, [selectedFile, viewMode]);
+
+  const toggleSection = (itemId: string) => {
+    setExpandedSections(prev => {
+      const next = new Set(prev);
+      if (next.has(itemId)) {
+        next.delete(itemId);
+      } else {
+        next.add(itemId);
+      }
+      return next;
+    });
+  };
+
+  const handleItemClick = (item: TextItem) => {
+    setSelectedItem(item);
+  };
+
+  const renderItem = (item: TextItem, level = 0): React.ReactNode => {
+    const isSelected = selectedItem?.id === item.id;
+    const isExpanded = expandedSections.has(item.id);
+    const hasChildren = item.children && item.children.length > 0;
+
+    if (viewMode === 'section' && hasChildren) {
+      return (
+        <div key={item.id} className="mb-2">
+          <div
+            className={`flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors ${
+              isSelected
+                ? 'bg-blue-100 border-2 border-blue-500'
+                : 'bg-slate-50 border border-slate-200 hover:border-slate-300'
+            }`}
+            onClick={() => handleItemClick(item)}
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleSection(item.id);
+              }}
+              className="p-1 hover:bg-slate-200 rounded"
+            >
+              {isExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            </button>
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                  Section {item.level === 1 ? '1' : '2'}
+                </span>
+                <span className="text-sm font-medium text-slate-700">
+                  {item.content.substring(0, 100)}...
+                </span>
+              </div>
+            </div>
+          </div>
+          {isExpanded && item.children && (
+            <div className="ml-8 mt-2">
+              {item.children.map(child => renderItem(child, level + 1))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <div
+        key={item.id}
+        onClick={() => handleItemClick(item)}
+        className={`p-4 mb-2 rounded-lg cursor-pointer transition-colors border-2 ${
+          isSelected
+            ? 'bg-blue-50 border-blue-500 shadow-md'
+            : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'
+        }`}
+      >
+        <div className="flex items-start gap-2">
+          <div className="flex-1">
+            {viewMode === 'section' && item.level && (
+              <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded mb-2 inline-block">
+                {item.level === 1 ? 'Section' : 'Subsection'}
+              </span>
+            )}
+            {viewMode === 'paragraph' && (
+              <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded mb-2 inline-block">
+                Paragraph
+              </span>
+            )}
+            {viewMode === 'sentence' && (
+              <span className="text-xs font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded mb-2 inline-block">
+                Sentence
+              </span>
+            )}
+            <div className="text-sm text-slate-700 whitespace-pre-wrap font-mono">
+              {item.content}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const flattenItems = (items: TextItem[]): TextItem[] => {
+    const result: TextItem[] = [];
+    for (const item of items) {
+      result.push(item);
+      if (item.children) {
+        result.push(...flattenItems(item.children));
+      }
+    }
+    return result;
+  };
+
+  const handleRestoreBackup = (backupContent: string): void => {
+    setCurrentContent(backupContent);
+    const parsed = parseContent(backupContent, viewMode);
+    setItems(parsed);
+    setShowBackupTimeline(false);
+  };
+
+  const handleSaveChanges = async (newContent: string): Promise<void> => {
+    if (!selectedFile || !selectedProject) return;
+
+    try {
+      const projectId = selectedProject.project.id;
+      const response = await fetch(`/api/files/${encodeURIComponent(selectedFile.path)}?projectId=${encodeURIComponent(projectId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: newContent, createBackup: true }),
+      });
+
+      if (response.ok) {
+        setCurrentContent(newContent);
+        const parsed = parseContent(newContent, viewMode);
+        setItems(parsed);
+      }
+    } catch (error) {
+      console.error('Failed to save file:', error);
+    }
+  };
+
+  return (
+    <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
+      {/* Top Bar */}
+      {selectedFile && (
+        <div className="px-6 py-4 border-b border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <FileText size={20} className="text-orange-500" />
+              <h2 className="text-lg font-semibold text-slate-800">{selectedFile.name}</h2>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowBackupTimeline(true)}
+                className="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg transition-colors"
+                title="View backup history"
+              >
+                <Clock size={16} />
+                Backups
+              </button>
+              <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
+                <button
+                  onClick={() => setViewMode('section')}
+                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
+                    viewMode === 'section'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                >
+                  Section
+                </button>
+                <button
+                  onClick={() => setViewMode('paragraph')}
+                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
+                    viewMode === 'paragraph'
+                      ? 'bg-white text-green-600 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                >
+                  Paragraph
+                </button>
+                <button
+                  onClick={() => setViewMode('sentence')}
+                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
+                    viewMode === 'sentence'
+                      ? 'bg-white text-purple-600 shadow-sm'
+                      : 'text-slate-600 hover:text-slate-800'
+                  }`}
+                >
+                  Sentence
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Content Area */}
+      <div className="flex-1 overflow-y-auto p-6">
+        {selectedFile ? (
+          items.length > 0 ? (
+            <div className="max-w-4xl mx-auto">
+              {items.map(item => renderItem(item))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full text-slate-400">
+              <div className="text-center">
+                <FileText size={48} className="mx-auto mb-3 text-slate-300" />
+                <p className="text-sm">No content found</p>
+              </div>
+            </div>
+          )
+        ) : selectedProject ? (
+          <div className="flex items-center justify-center h-full text-slate-400">
+            <div className="text-center">
+              <FolderOpen size={48} className="mx-auto mb-3 text-slate-300" />
+              <p className="text-sm mb-2">Select a .tex file from the left panel</p>
+              <p className="text-xs text-slate-500">{selectedProject.project.name}</p>
+            </div>
+          </div>
+        ) : (
+          <div className="flex items-center justify-center h-full text-slate-400">
+            <div className="text-center">
+              <FolderOpen size={48} className="mx-auto mb-3 text-slate-300" />
+              <p className="text-sm mb-2">Welcome to FastWrite</p>
+              <p className="text-xs text-slate-500">Import or select a project to get started</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {selectedItem && (
+        <AIEditorPanel
+          isOpen={!!selectedItem}
+          selectedItemId={selectedItem.id}
+          item={selectedItem}
+          fileContent={items.map(i => i.content).join('\n')}
+          onClose={() => setSelectedItem(null)}
+          onResult={(result, modifiedContent, aiMode) => {
+            if (!modifiedContent) return;
+            
+            const updateItemContent = (items: TextItem[], itemId: string, newContent: string): TextItem[] => {
+              return items.map(i => {
+                if (i.id === itemId) {
+                  return { ...i, modifiedContent: newContent, status: 'modified', aiMode, aiTimestamp: new Date().toISOString() };
+                }
+                if (i.children) {
+                  return { ...i, children: updateItemContent(i.children, itemId, newContent) };
+                }
+                return i;
+              });
+            };
+            
+            const updatedItems = updateItemContent(items, result.itemId, modifiedContent);
+            setItems(updatedItems);
+            
+            const newFileContent = updatedItems.map(i => {
+              if (i.id === result.itemId && i.modifiedContent) {
+                return i.modifiedContent;
+              }
+              return i.content;
+            }).join('\n');
+            
+            handleSaveChanges(newFileContent);
+          }}
+        />
+      )}
+
+      {showBackupTimeline && selectedFile && (
+        <BackupTimeline
+          projectId={selectedProject?.project.id || ''}
+          filePath={selectedFile.path}
+          fileName={selectedFile.name}
+          onClose={() => setShowBackupTimeline(false)}
+          onRestore={handleRestoreBackup}
+        />
+      )}
+    </div>
+  );
+};
+
+export default MainEditor;
