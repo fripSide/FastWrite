@@ -1,18 +1,10 @@
 [
   {
-    "id": "proj_1768291314005_fbtw0upg",
-    "name": "latex-paper1",
+    "id": "proj_1768316780330_ptj088ug",
+    "name": "Test Project",
     "type": "local",
-    "localPath": "/Users/fripside/Dev/FastWrite/demo/latex-paper1",
-    "createdAt": "2026-01-13T08:01:54.006Z",
+    "localPath": "/Users/fripside/Work/Dev/VibeDev/FastWrite/demo/latex-paper1",
+    "createdAt": "2026-01-13T15:06:20.331Z",
     "status": "active"
-  },
-  {
-    "id": "proj_1768291369771_g6tiq8dz",
-    "name": "latex-paper1",
-    "type": "local",
-    "localPath": "/Users/fripside/Dev/FastWrite/demo/latex-paper1/",
-    "createdAt": "2026-01-13T08:02:49.772Z",
-    "status": "archived"
   }
 ]

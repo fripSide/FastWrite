@@ -2,17 +2,17 @@ import { existsSync, readdirSync, readFileSync, writeFileSync, statSync, mkdirSy
 import { join, extname, basename } from "node:path";
 import { execSync } from "node:child_process";
 import type { FileNode } from "../web/src/types";
-import { 
-  loadProjects, 
-  createProject, 
-  deleteProject, 
+import {
+  loadProjects,
+  createProject,
+  deleteProject,
   setActiveProject,
   getProjectConfig,
   getActiveProject
 } from "./projectConfig";
 import { processWithAI } from "./llmService";
 
-const PORT = 3002;
+const PORT = parseInt(process.env.PORT || "3002", 10);
 const STATIC_DIR = join(import.meta.dir, "../web/dist");
 
 const MIME_TYPES: Record<string, string> = {
@@ -31,14 +31,14 @@ const MIME_TYPES: Record<string, string> = {
 // Shared directory scanning utility
 function scanDirectoryForTexFiles(dir: string, base: string = dir): FileNode[] {
   const nodes: FileNode[] = [];
-  
+
   try {
     const entries = readdirSync(dir, { withFileTypes: true });
-    
+
     for (const entry of entries) {
       const fullPath = join(dir, entry.name);
       const relativePath = fullPath.replace(base + '/', '');
-      
+
       if (entry.isDirectory()) {
         const children = scanDirectoryForTexFiles(fullPath, base);
         if (children.length > 0) {
@@ -63,7 +63,7 @@ function scanDirectoryForTexFiles(dir: string, base: string = dir): FileNode[] {
   } catch (error) {
     console.error(`Failed to scan directory ${dir}:`, error);
   }
-  
+
   return nodes;
 }
 
@@ -76,12 +76,12 @@ function json(data: unknown, status = 200) {
 
 function serveStatic(pathname: string): Response | null {
   let filePath = join(STATIC_DIR, pathname);
-  
+
   // Default to index.html for root or missing files (SPA)
   if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
     filePath = join(STATIC_DIR, "index.html");
   }
-  
+
   if (!existsSync(filePath)) {
     return null;
   }
@@ -89,7 +89,7 @@ function serveStatic(pathname: string): Response | null {
   const ext = extname(filePath);
   const contentType = MIME_TYPES[ext] || "application/octet-stream";
   const content = readFileSync(filePath);
-  
+
   return new Response(content, {
     headers: { "Content-Type": contentType },
   });
@@ -133,10 +133,10 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
   "GET:/api/projects/:id/files": async (_req, params) => {
     const projectId = params[0];
     if (!projectId) return json({ error: "Project ID required" }, 400);
-    
+
     const config = await getProjectConfig(projectId);
     if (!config) return json({ error: "Project config not found" }, 404);
-    
+
     const files = scanDirectoryForTexFiles(config.sectionsDir);
     return json({ files });
   },
@@ -172,7 +172,7 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     try {
       const { path } = await req.json() as { path: string };
       if (!path || !existsSync(path)) return json({ error: "Invalid path" }, 400);
-      
+
       const stats = statSync(path);
       if (!stats.isDirectory()) return json({ error: "Path is not a directory" }, 400);
 
@@ -186,10 +186,10 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
   "GET:/api/backups/:projectId": async (_req, params) => {
     const config = await getProjectConfig(params[0]!);
     if (!config) return json([]);
-    
+
     const backupsDir = config.backupsDir;
     if (!existsSync(backupsDir)) return json([]);
-    
+
     return json(readdirSync(backupsDir)
       .filter(f => f.endsWith(".bak"))
       .sort().reverse()
@@ -224,7 +224,7 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
   "POST:/api/system-prompt/:projectId": async (req, params) => {
     const { content } = await req.json() as { content: string };
     const projDir = join(process.cwd(), "projs", params[0]!);
-    
+
     if (!existsSync(projDir)) mkdirSync(projDir, { recursive: true });
     writeFileSync(join(projDir, "system.md"), content, "utf-8");
     return json({ success: true });
@@ -320,14 +320,14 @@ function matchRoute(method: string, path: string): { handler: (req: Request, par
     const [m, ...pathParts] = pattern.split(":");
     const routePath = pathParts.join(":");
     if (m !== method) continue;
-    
+
     const routeSegments = routePath.split("/");
     const pathSegments = path.split("/");
     if (routeSegments.length !== pathSegments.length) continue;
-    
+
     const params: string[] = [];
     let match = true;
-    
+
     for (let i = 0; i < routeSegments.length; i++) {
       if (routeSegments[i]!.startsWith(":")) {
         params.push(pathSegments[i]!);
@@ -336,7 +336,7 @@ function matchRoute(method: string, path: string): { handler: (req: Request, par
         break;
       }
     }
-    
+
     if (match) return { handler, params };
   }
   return null;
@@ -347,9 +347,97 @@ const server = Bun.serve({
   port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
-    
+
     // API routes
     if (url.pathname.startsWith("/api/")) {
+      // Special handling for /api/files/ since the path can contain slashes
+      if (url.pathname.startsWith("/api/files/")) {
+        const encodedPath = url.pathname.substring("/api/files/".length);
+        const filePath = decodeURIComponent(encodedPath);
+        const projectId = url.searchParams.get("projectId");
+
+        if (!filePath) {
+          return json({ error: "File path required" }, 400);
+        }
+
+        if (req.method === "GET") {
+          // Read file content
+          if (!existsSync(filePath)) {
+            return json({ error: "File not found" }, 404);
+          }
+
+          try {
+            const content = readFileSync(filePath, "utf-8");
+
+            // Also parse sections for the file
+            const lines = content.split('\n');
+            const sections: { id: string; level: number; title: string; lineStart: number }[] = [];
+            const sectionRegex = /\\section\*?\s*\{([^}]*)\}/;
+            const subsectionRegex = /\\subsection\*?\s*\{([^}]*)\}/;
+
+            lines.forEach((line, index) => {
+              let match: RegExpExecArray | null = null;
+              let level = 0;
+
+              if ((match = sectionRegex.exec(line)) !== null) {
+                level = 1;
+              } else if ((match = subsectionRegex.exec(line)) !== null) {
+                level = 2;
+              }
+
+              if (match && level > 0) {
+                sections.push({
+                  id: `section_${sections.length}`,
+                  level,
+                  title: (match[1] || '').trim(),
+                  lineStart: index + 1
+                });
+              }
+            });
+
+            return json({ content, sections });
+          } catch (error) {
+            return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+          }
+        } else if (req.method === "POST") {
+          // Write file content with optional backup
+          try {
+            const body = await req.json() as { content: string; createBackup?: boolean };
+
+            if (!body.content && body.content !== "") {
+              return json({ error: "Content is required" }, 400);
+            }
+
+            // Create backup if requested and file exists
+            if (body.createBackup && existsSync(filePath) && projectId) {
+              const config = await getProjectConfig(projectId);
+              if (config) {
+                const backupsDir = config.backupsDir;
+                if (!existsSync(backupsDir)) {
+                  mkdirSync(backupsDir, { recursive: true });
+                }
+
+                const filename = basename(filePath);
+                const timestamp = new Date().toISOString().replace(/[-:T]/g, "").substring(0, 15);
+                const backupPath = join(backupsDir, `${filename}.${timestamp}.bak`);
+
+                const originalContent = readFileSync(filePath, "utf-8");
+                writeFileSync(backupPath, originalContent, "utf-8");
+              }
+            }
+
+            // Write new content
+            writeFileSync(filePath, body.content, "utf-8");
+
+            return json({ success: true });
+          } catch (error) {
+            return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+          }
+        }
+
+        return json({ error: "Method not allowed" }, 405);
+      }
+
       const matched = matchRoute(req.method, url.pathname);
       if (matched) {
         return matched.handler(req, matched.params);

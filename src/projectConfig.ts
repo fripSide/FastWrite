@@ -47,6 +47,10 @@ export async function createProject(name: string, localPath: string): Promise<Pr
   
   const existing = projects.find(p => p.localPath.replace(/\/+$/, '') === normalizedPath);
   if (existing) {
+    if (existing.name !== projectName) {
+      existing.name = projectName;
+      await saveProjects(projects);
+    }
     await setActiveProject(existing.id);
     return existing;
   }

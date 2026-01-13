@@ -33,12 +33,11 @@ function App() {
 
   const handleFileSelect = async (file: FileNode): Promise<void> => {
     if (!selectedProject) return;
-    
+
     try {
       const projectId = selectedProject.project.id;
-      const relativePath = file.path.replace(selectedProject.project.localPath + '/', '');
-      const response = await fetch(`/api/files/${projectId}/${encodeURIComponent(relativePath)}`);
-      
+      const response = await fetch(`/api/files/${encodeURIComponent(file.path)}?projectId=${encodeURIComponent(projectId)}`);
+
       if (response.ok) {
         const data = await response.json();
         setSelectedFile({

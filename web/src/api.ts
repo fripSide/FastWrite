@@ -21,38 +21,38 @@ async function postJson<T>(url: string, data: unknown): Promise<T | null> {
 export const api = {
   // Projects
   getProjects: () => fetchJson<Project[]>('/api/projects'),
-  
-  importLocalProject: (path: string, name: string) => 
+
+  importLocalProject: (path: string, name: string) =>
     postJson<Project>('/api/projects/import-local', { path, name }),
-  
-  importGitHubProject: (url: string, branch?: string) => 
+
+  importGitHubProject: (url: string, branch?: string) =>
     postJson<{ success: boolean; path: string; name: string }>('/api/projects/import-github', { url, branch }),
-  
+
   deleteProject: async (projectId: string) => {
     const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
     return res.ok;
   },
-  
-  activateProject: (projectId: string) => 
+
+  activateProject: (projectId: string) =>
     postJson<{ success: boolean }>(`/api/projects/${projectId}/activate`, {}),
-  
+
   browseDirectory: () => postJson<{ path: string | null }>('/api/utils/browse-directory', {}),
-  
+
   // System Prompt
   getSystemPrompt: async (projectId: string) => {
     const data = await fetchJson<{ content: string }>(`/api/system-prompt/${projectId}`);
     return data?.content || '';
   },
-  
+
   saveSystemPrompt: async (projectId: string, content: string) => {
     const res = await postJson<{ success: boolean }>(`/api/system-prompt/${projectId}`, { content });
     return res?.success || false;
   },
-  
+
   // Backups
-  getBackups: async (projectId: string) => 
+  getBackups: async (projectId: string) =>
     (await fetchJson<Backup[]>(`/api/backups/${projectId}`)) || [],
-  
+
   // AI
   processAI: (mode: string, content: string, userPrompt?: string) =>
     postJson<{ content: string }>('/api/ai/process', { mode, content, userPrompt }),
@@ -63,5 +63,21 @@ export const api = {
       `/api/parse-sections?path=${encodeURIComponent(filePath)}`
     );
     return data?.sections || [];
+  },
+
+  // File Operations
+  readFile: async (filePath: string, projectId: string) => {
+    const data = await fetchJson<{ content: string; sections: Array<{ id: string; level: number; title: string; lineStart: number }> }>(
+      `/api/files/${encodeURIComponent(filePath)}?projectId=${encodeURIComponent(projectId)}`
+    );
+    return data;
+  },
+
+  writeFile: async (filePath: string, content: string, projectId: string, createBackup: boolean = true) => {
+    const res = await postJson<{ success: boolean }>(
+      `/api/files/${encodeURIComponent(filePath)}?projectId=${encodeURIComponent(projectId)}`,
+      { content, createBackup }
+    );
+    return res?.success || false;
   }
 };

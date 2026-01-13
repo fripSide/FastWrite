@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { ChevronDown, ChevronRight, FileText, Clock, FolderOpen } from 'lucide-react';
-import type { SelectedFile, SelectedProject, ViewMode, TextItem } from '../types';
+import type { SelectedFile, SelectedProject, ViewMode, TextItem, DiffResult, AIMode } from '../types';
 import { parseContent } from '../utils/parser';
 import AIEditorPanel from './AIEditorPanel';
 import BackupTimeline from './BackupTimeline';
@@ -18,6 +18,20 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
   const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [showBackupTimeline, setShowBackupTimeline] = useState(false);
   const [currentContent, setCurrentContent] = useState<string>('');
+  const [isAIPanelFullscreen, setIsAIPanelFullscreen] = useState(false);
+
+  // Auto-scroll selected item to bottom of view
+  useEffect(() => {
+    if (selectedItem) {
+      // Small timeout to allow layout to adjust
+      setTimeout(() => {
+        const el = document.getElementById(`item-${selectedItem.id}`);
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    }
+  }, [selectedItem?.id]);
 
   useEffect(() => {
     if (selectedFile?.content) {
@@ -44,6 +58,51 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
     setSelectedItem(item);
   };
 
+  const handleContentUpdate = (itemId: string, newContent: string) => {
+    const updateContent = (items: TextItem[]): TextItem[] => {
+      return items.map(i => {
+        if (i.id === itemId) {
+          return { ...i, content: newContent };
+        }
+        if (i.children) {
+          return { ...i, children: updateContent(i.children) };
+        }
+        return i;
+      });
+    };
+    const updatedItems = updateContent(items);
+    setItems(updatedItems);
+    setSelectedItem(prev => prev?.id === itemId ? { ...prev, content: newContent } : prev);
+  };
+
+  const handleAIResult = (result: DiffResult, modifiedContent: string, mode: AIMode) => {
+    if (!modifiedContent) return;
+
+    const updateItemContent = (items: TextItem[], itemId: string, newContent: string): TextItem[] => {
+      return items.map(i => {
+        if (i.id === itemId) {
+          return { ...i, modifiedContent: newContent, status: 'modified', aiMode: mode, aiTimestamp: new Date().toISOString() };
+        }
+        if (i.children) {
+          return { ...i, children: updateItemContent(i.children, itemId, newContent) };
+        }
+        return i;
+      });
+    };
+
+    const updatedItems = updateItemContent(items, result.itemId, modifiedContent);
+    setItems(updatedItems);
+
+    const newFileContent = updatedItems.map(i => {
+      if (i.id === result.itemId && i.modifiedContent) {
+        return i.modifiedContent;
+      }
+      return i.content;
+    }).join('\n');
+
+    handleSaveChanges(newFileContent);
+  };
+
   const renderItem = (item: TextItem, level = 0): React.ReactNode => {
     const isSelected = selectedItem?.id === item.id;
     const isExpanded = expandedSections.has(item.id);
@@ -51,13 +110,12 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
 
     if (viewMode === 'section' && hasChildren) {
       return (
-        <div key={item.id} className="mb-2">
+        <div key={item.id} id={`item-${item.id}`} className="mb-2">
           <div
-            className={`flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors ${
-              isSelected
-                ? 'bg-blue-100 border-2 border-blue-500'
-                : 'bg-slate-50 border border-slate-200 hover:border-slate-300'
-            }`}
+            className={`flex items-center gap-2 p-3 rounded-lg cursor-pointer transition-colors ${isSelected
+              ? 'bg-blue-100 border-2 border-blue-500'
+              : 'bg-slate-50 border border-slate-200 hover:border-slate-300'
+              }`}
             onClick={() => handleItemClick(item)}
           >
             <button
@@ -90,37 +148,59 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
     }
 
     return (
-      <div
-        key={item.id}
-        onClick={() => handleItemClick(item)}
-        className={`p-4 mb-2 rounded-lg cursor-pointer transition-colors border-2 ${
-          isSelected
+      <div key={item.id} id={`item-${item.id}`} className="mb-2">
+        <div
+          onClick={() => handleItemClick(item)}
+          className={`p-4 rounded-lg cursor-pointer transition-colors border-2 ${isSelected
             ? 'bg-blue-50 border-blue-500 shadow-md'
             : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'
-        }`}
-      >
-        <div className="flex items-start gap-2">
-          <div className="flex-1">
-            {viewMode === 'section' && item.level && (
-              <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded mb-2 inline-block">
-                {item.level === 1 ? 'Section' : 'Subsection'}
-              </span>
-            )}
-            {viewMode === 'paragraph' && (
-              <span className="text-xs font-semibold text-green-600 bg-green-50 px-2 py-0.5 rounded mb-2 inline-block">
-                Paragraph
-              </span>
-            )}
-            {viewMode === 'sentence' && (
-              <span className="text-xs font-semibold text-purple-600 bg-purple-50 px-2 py-0.5 rounded mb-2 inline-block">
-                Sentence
-              </span>
-            )}
-            <div className="text-sm text-slate-700 whitespace-pre-wrap font-mono">
-              {item.content}
+            }`}
+        >
+          <div className="flex items-start gap-2">
+            <div className="flex-1">
+              {isSelected ? (
+                <textarea
+                  id={`edit-textarea-${item.id}`}
+                  className="w-full text-sm text-slate-700 whitespace-pre-wrap font-mono bg-transparent border-0 focus:outline-none focus:ring-0 resize-none overflow-y-auto"
+                  value={item.content}
+                  onChange={(e) => {
+                    handleContentUpdate(item.id, e.target.value);
+                    e.target.style.height = 'auto';
+                    e.target.style.height = Math.min(e.target.scrollHeight, window.innerHeight * 0.5) + 'px';
+                  }}
+                  onClick={(e) => e.stopPropagation()}
+                  ref={(el) => {
+                    if (el) {
+                      el.style.height = 'auto';
+                      el.style.height = Math.min(el.scrollHeight, window.innerHeight * 0.5) + 'px';
+                    }
+                  }}
+                  style={{ maxHeight: '50vh' }}
+                  autoFocus
+                />
+              ) : (
+                <div className="text-sm text-slate-700 whitespace-pre-wrap font-mono">
+                  {item.content}
+                </div>
+              )}
             </div>
           </div>
         </div>
+
+        {/* Inline AI Panel */}
+        {isSelected && (
+          <AIEditorPanel
+            isOpen={true}
+            selectedItemId={item.id}
+            item={item}
+            fileContent=""
+            projectId={selectedProject?.project.id || ''}
+            onClose={() => setSelectedItem(null)}
+            onResult={handleAIResult}
+            onContentChange={(newContent) => handleContentUpdate(item.id, newContent)}
+            onFullscreenChange={setIsAIPanelFullscreen}
+          />
+        )}
       </div>
     );
   };
@@ -186,31 +266,28 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
               <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
                 <button
                   onClick={() => setViewMode('section')}
-                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
-                    viewMode === 'section'
-                      ? 'bg-white text-blue-600 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-800'
-                  }`}
+                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${viewMode === 'section'
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-800'
+                    }`}
                 >
                   Section
                 </button>
                 <button
                   onClick={() => setViewMode('paragraph')}
-                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
-                    viewMode === 'paragraph'
-                      ? 'bg-white text-green-600 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-800'
-                  }`}
+                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${viewMode === 'paragraph'
+                    ? 'bg-white text-green-600 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-800'
+                    }`}
                 >
                   Paragraph
                 </button>
                 <button
                   onClick={() => setViewMode('sentence')}
-                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${
-                    viewMode === 'sentence'
-                      ? 'bg-white text-purple-600 shadow-sm'
-                      : 'text-slate-600 hover:text-slate-800'
-                  }`}
+                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${viewMode === 'sentence'
+                    ? 'bg-white text-purple-600 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-800'
+                    }`}
                 >
                   Sentence
                 </button>
@@ -220,11 +297,11 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
         </div>
       )}
 
-      {/* Content Area */}
+      {/* Content Area - dynamic height when AI panel is open */}
       <div className="flex-1 overflow-y-auto p-6">
         {selectedFile ? (
           items.length > 0 ? (
-            <div className="max-w-4xl mx-auto">
+            <div className="max-w-4xl mx-auto pb-4">
               {items.map(item => renderItem(item))}
             </div>
           ) : (
@@ -253,43 +330,6 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
           </div>
         )}
       </div>
-
-      {selectedItem && (
-        <AIEditorPanel
-          isOpen={!!selectedItem}
-          selectedItemId={selectedItem.id}
-          item={selectedItem}
-          fileContent={items.map(i => i.content).join('\n')}
-          onClose={() => setSelectedItem(null)}
-          onResult={(result, modifiedContent, aiMode) => {
-            if (!modifiedContent) return;
-            
-            const updateItemContent = (items: TextItem[], itemId: string, newContent: string): TextItem[] => {
-              return items.map(i => {
-                if (i.id === itemId) {
-                  return { ...i, modifiedContent: newContent, status: 'modified', aiMode, aiTimestamp: new Date().toISOString() };
-                }
-                if (i.children) {
-                  return { ...i, children: updateItemContent(i.children, itemId, newContent) };
-                }
-                return i;
-              });
-            };
-            
-            const updatedItems = updateItemContent(items, result.itemId, modifiedContent);
-            setItems(updatedItems);
-            
-            const newFileContent = updatedItems.map(i => {
-              if (i.id === result.itemId && i.modifiedContent) {
-                return i.modifiedContent;
-              }
-              return i.content;
-            }).join('\n');
-            
-            handleSaveChanges(newFileContent);
-          }}
-        />
-      )}
 
       {showBackupTimeline && selectedFile && (
         <BackupTimeline

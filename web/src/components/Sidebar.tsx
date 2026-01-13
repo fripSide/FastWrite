@@ -56,7 +56,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             parseLaTeXOutline(config.sectionsDir);
           }
         });
-      
+
       fetch(`/api/projects/${selectedProject.project.id}/files`)
         .then(r => r.ok ? r.json() : null)
         .then(data => {
@@ -64,7 +64,7 @@ const Sidebar: React.FC<SidebarProps> = ({
             setFiles(data.files);
           }
         });
-      
+
       loadSystemPrompt();
     } else {
       setFiles([]);
@@ -148,9 +148,8 @@ const Sidebar: React.FC<SidebarProps> = ({
     return nodes.map(node => (
       <div key={node.id}>
         <div
-          className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-100 rounded-md ${
-            selectedProject?.activeFileId === node.id ? 'bg-blue-100' : ''
-          }`}
+          className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-100 rounded-md ${selectedProject?.activeFileId === node.id ? 'bg-blue-100' : ''
+            }`}
           style={{ paddingLeft: `${level * 16 + 12}px` }}
           onClick={() => {
             if (node.type === 'folder') {
@@ -185,7 +184,7 @@ const Sidebar: React.FC<SidebarProps> = ({
   };
 
   return (
-    <div className="w-full h-full flex flex-col bg-slate-50">
+    <div className="w-80 h-full flex flex-col bg-slate-50 border-r border-slate-200">
       <div className="border-b border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between px-4 py-3">
           <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
@@ -251,7 +250,7 @@ const Sidebar: React.FC<SidebarProps> = ({
               <ChevronLeft size={16} />
               Back to Projects
             </button>
-            
+
             <div className="space-y-2 mb-4">
               <div className="rounded-lg border-2 border-blue-500 bg-blue-50 p-3">
                 <div className="flex items-center gap-3">
@@ -282,7 +281,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 <span>System Prompt Configuration</span>
                 {editingSystemPrompt ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
               </button>
-              
+
               {editingSystemPrompt && (
                 <div className="mt-2 p-3 bg-slate-100 rounded-lg">
                   <textarea
@@ -312,7 +311,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 </div>
               )}
             </div>
-            
+
             {files.length > 0 ? (
               <div className="space-y-1">
                 {renderFileTree(files)}
@@ -336,9 +335,8 @@ const Sidebar: React.FC<SidebarProps> = ({
             {sections.map(section => (
               <div
                 key={section.id}
-                className={`p-3 border-l-4 ${
-                  expandedSections.has(section.id) ? 'border-blue-200' : 'border-transparent'
-                }`}
+                className={`p-3 border-l-4 ${expandedSections.has(section.id) ? 'border-blue-200' : 'border-transparent'
+                  }`}
               >
                 <div className="flex items-start gap-3">
                   <span className="text-sm font-medium text-slate-800">
