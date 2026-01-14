@@ -63,6 +63,7 @@ function App() {
         isOpen={isImportModalOpen}
         onClose={() => setIsImportModalOpen(false)}
         onImportComplete={handleImportComplete}
+        existingProjects={projects}
       />
 
       <div className="flex h-full w-full">

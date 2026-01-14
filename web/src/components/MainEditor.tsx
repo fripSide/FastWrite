@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, FileText, Clock, FolderOpen } from 'lucide-react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { ChevronDown, ChevronRight, FileText, Clock, FolderOpen, Check, Loader2 } from 'lucide-react';
 import type { SelectedFile, SelectedProject, ViewMode, TextItem, DiffResult, AIMode } from '../types';
 import { parseContent } from '../utils/parser';
 import AIEditorPanel from './AIEditorPanel';
@@ -20,6 +20,45 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
   const [currentContent, setCurrentContent] = useState<string>('');
   const [isAIPanelFullscreen, setIsAIPanelFullscreen] = useState(false);
 
+  // Auto-save state
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const pendingContentRef = useRef<string>('');
+
+  // Debounced save function
+  const debouncedSave = useCallback(async () => {
+    if (!selectedFile || !selectedProject) return;
+
+    setSaveStatus('saving');
+    try {
+      await api.writeFile(
+        selectedFile.path,
+        pendingContentRef.current,
+        selectedProject.project.id,
+        true
+      );
+      setSaveStatus('saved');
+      setTimeout(() => setSaveStatus('idle'), 2000);
+    } catch (error) {
+      console.error('Auto-save failed:', error);
+      setSaveStatus('idle');
+    }
+  }, [selectedFile, selectedProject]);
+
+  // Schedule save after content change
+  const scheduleSave = useCallback((newContent: string) => {
+    pendingContentRef.current = newContent;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(debouncedSave, 3000);
+  }, [debouncedSave]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
   // Auto-scroll selected item to bottom of view
   useEffect(() => {
     if (selectedItem) {
@@ -39,6 +78,7 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
       setItems(parsed);
       setSelectedItem(null);
       setCurrentContent(selectedFile.content);
+      pendingContentRef.current = selectedFile.content;
     }
   }, [selectedFile, viewMode]);
 
@@ -73,6 +113,10 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
     const updatedItems = updateContent(items);
     setItems(updatedItems);
     setSelectedItem(prev => prev?.id === itemId ? { ...prev, content: newContent } : prev);
+
+    // Compute full file content and schedule auto-save
+    const fullContent = updatedItems.map(i => i.content).join('\n');
+    scheduleSave(fullContent);
   };
 
   const handleAIResult = (result: DiffResult, modifiedContent: string, mode: AIMode) => {
@@ -107,6 +151,11 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
     const isSelected = selectedItem?.id === item.id;
     const isExpanded = expandedSections.has(item.id);
     const hasChildren = item.children && item.children.length > 0;
+
+    // Hide paragraph spacers in sentence/paragraph mode
+    if ((viewMode === 'sentence' || viewMode === 'paragraph') && item.content === '') {
+      return null;
+    }
 
     if (viewMode === 'section' && hasChildren) {
       return (
@@ -253,6 +302,19 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
             <div className="flex items-center gap-3">
               <FileText size={20} className="text-orange-500" />
               <h2 className="text-lg font-semibold text-slate-800">{selectedFile.name}</h2>
+              {/* Save Status Indicator */}
+              {saveStatus === 'saving' && (
+                <span className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
+                  <Loader2 size={12} className="animate-spin" />
+                  Saving...
+                </span>
+              )}
+              {saveStatus === 'saved' && (
+                <span className="flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full">
+                  <Check size={12} />
+                  Saved
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <button

@@ -10,7 +10,7 @@ import {
   getProjectConfig,
   getActiveProject
 } from "./projectConfig";
-import { processWithAI } from "./llmService";
+import { processWithAI, getLLMConfig, saveLLMConfig } from "./llmService";
 
 const PORT = parseInt(process.env.PORT || "3002", 10);
 const STATIC_DIR = join(import.meta.dir, "../web/dist");
@@ -29,6 +29,11 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 // Shared directory scanning utility
+// Natural sort: 0-abstract before 1-introduction, 10-conclusion after 9-evaluation
+function naturalSort(a: FileNode, b: FileNode): number {
+  return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
+}
+
 function scanDirectoryForTexFiles(dir: string, base: string = dir): FileNode[] {
   const nodes: FileNode[] = [];
 
@@ -64,7 +69,7 @@ function scanDirectoryForTexFiles(dir: string, base: string = dir): FileNode[] {
     console.error(`Failed to scan directory ${dir}:`, error);
   }
 
-  return nodes;
+  return nodes.sort(naturalSort);
 }
 
 function json(data: unknown, status = 200) {
@@ -212,6 +217,62 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
       return json({ content: await processWithAI(request) });
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "GET:/api/llm-config": async () => {
+    const config = getLLMConfig();
+    // Mask API key for security
+    return json({
+      baseUrl: config.baseUrl,
+      apiKey: config.apiKey ? `${config.apiKey.substring(0, 8)}...${config.apiKey.substring(config.apiKey.length - 4)}` : '',
+      model: config.model,
+      hasApiKey: !!config.apiKey
+    });
+  },
+
+  "POST:/api/llm-config": async (req) => {
+    try {
+      const config = await req.json() as { baseUrl?: string; apiKey?: string; model?: string };
+      const success = saveLLMConfig(config);
+      return success ? json({ success: true }) : json({ error: "Failed to save config" }, 500);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "POST:/api/llm-config/test": async (req) => {
+    try {
+      const config = await req.json() as { baseUrl: string; apiKey: string; model: string };
+
+      if (!config.apiKey) {
+        return json({ success: false, error: "API key is required" }, 400);
+      }
+
+      // Use OpenAI SDK to test connection
+      const OpenAI = (await import('openai')).default;
+      const baseURL = config.baseUrl.replace(/\/chat\/completions\/?$/, '');
+      const client = new OpenAI({
+        apiKey: config.apiKey,
+        baseURL
+      });
+
+      const response = await client.chat.completions.create({
+        model: config.model,
+        messages: [{ role: 'user', content: 'Hi, please respond with just "OK" to confirm the connection works.' }],
+        max_tokens: 10,
+        temperature: 0
+      });
+
+      const content = response.choices[0]?.message?.content;
+      return json({
+        success: true,
+        message: content || 'Connection successful',
+        model: response.model
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return json({ success: false, error: message }, 200); // Return 200 so frontend can show error
     }
   },
 

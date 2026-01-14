@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { FolderOpen, X, FileText, Loader2, Github } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { FolderOpen, X, FileText, Loader2, Github, AlertCircle } from 'lucide-react';
 import type { Project, FileNode } from '../types';
 import { api } from '../api';
 
@@ -7,6 +7,7 @@ interface ImportModalProps {
   isOpen: boolean;
   onClose: () => void;
   onImportComplete: (project: Project) => void;
+  existingProjects?: Project[];
 }
 
 interface DirectoryPreview {
@@ -14,7 +15,12 @@ interface DirectoryPreview {
   files: FileNode[];
 }
 
-const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComplete }) => {
+interface DuplicateInfo {
+  project: Project;
+  message: string;
+}
+
+const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComplete, existingProjects = [] }) => {
   const [directoryPath, setDirectoryPath] = useState('');
   const [projectName, setProjectName] = useState('');
   const [preview, setPreview] = useState<DirectoryPreview | null>(null);
@@ -24,7 +30,55 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
   const [stage, setStage] = useState<'input' | 'preview' | 'importing'>('input');
   const [importType, setImportType] = useState<'local' | 'github'>('local');
   const [githubUrl, setGithubUrl] = useState('');
+  const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
   const [githubBranch, setGithubBranch] = useState('main');
+
+  // Helper to extract name from path
+  const extractNameFromPath = (path: string): string => {
+    const parts = path.replace(/\/+$/, '').split('/').filter(Boolean);
+    return parts[parts.length - 1] || 'New Project';
+  };
+
+  // Check for duplicate project by path
+  const checkForDuplicate = (path: string): DuplicateInfo | null => {
+    const normalizedPath = path.replace(/\/+$/, '');
+    const existing = existingProjects.find(
+      p => p.localPath.replace(/\/+$/, '') === normalizedPath
+    );
+    if (existing) {
+      return {
+        project: existing,
+        message: `Project "${existing.name}" already exists at this path. Importing will activate the existing project.`
+      };
+    }
+    return null;
+  };
+
+  // Auto-set project name when directory path changes
+  useEffect(() => {
+    if (directoryPath) {
+      const name = extractNameFromPath(directoryPath);
+      setProjectName(name);
+      setDuplicateInfo(checkForDuplicate(directoryPath));
+    } else {
+      setProjectName('');
+      setDuplicateInfo(null);
+    }
+  }, [directoryPath, existingProjects]);
+
+  // Handle ESC key
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isImporting && !isAnalyzing) {
+        onClose();
+      }
+    };
+
+    if (isOpen) {
+      window.addEventListener('keydown', handleKeyDown);
+    }
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose, isImporting, isAnalyzing]);
 
   const handleBrowse = async () => {
     try {
@@ -84,14 +138,14 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
       setError('Please enter a project name');
       return;
     }
-  
+
     setIsImporting(true);
     setError(null);
     setStage('importing');
-  
+
     try {
       let result: Project | null = null;
-      
+
       if (importType === 'local') {
         result = await api.importLocalProject(directoryPath, projectName);
       } else if (importType === 'github') {
@@ -99,14 +153,14 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
           setError('Please enter a GitHub URL');
           return;
         }
-        
+
         const githubResult = await api.importGitHubProject(githubUrl, githubBranch);
         if (githubResult?.success) {
           result = await api.importLocalProject(githubResult.path, githubResult.name);
           setProjectName(githubResult.name);
         }
       }
-      
+
       if (result) {
         onImportComplete(result);
         onClose();
@@ -116,6 +170,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
         setGithubBranch('main');
         setPreview(null);
         setStage('input');
+        setDuplicateInfo(null);
       } else {
         setError('Failed to import project');
       }
@@ -142,9 +197,9 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-[100]">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
-        <div className="px-6 py-4 border-b border-slate-200">
+        <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
           <h2 className="text-xl font-bold text-slate-800">Import LaTeX Paper Project</h2>
           <button
             onClick={onClose}
@@ -161,28 +216,26 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
               <div className="flex gap-2 mb-4">
                 <button
                   onClick={() => setImportType('local')}
-                  className={`flex-1 px-4 py-2 border-2 rounded-lg font-medium transition-colors ${
-                    importType === 'local' 
-                      ? 'border-blue-500 bg-blue-50 text-blue-700' 
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'
-                  }`}
+                  className={`flex-1 px-4 py-2 border-2 rounded-lg font-medium transition-colors ${importType === 'local'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'
+                    }`}
                 >
                   <FolderOpen size={18} className="mr-2" />
                   Local Directory
                 </button>
                 <button
                   onClick={() => setImportType('github')}
-                  className={`flex-1 px-4 py-2 border-2 rounded-lg font-medium transition-colors ${
-                    importType === 'github' 
-                      ? 'border-blue-500 bg-blue-50 text-blue-700' 
-                      : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'
-                  }`}
+                  className={`flex-1 px-4 py-2 border-2 rounded-lg font-medium transition-colors ${importType === 'github'
+                    ? 'border-blue-500 bg-blue-50 text-blue-700'
+                    : 'border-slate-200 bg-white text-slate-600 hover:border-blue-300'
+                    }`}
                 >
                   <Github size={18} className="mr-2" />
                   GitHub Repository
                 </button>
               </div>
-              
+
               {importType === 'github' && (
                 <>
                   <div>
@@ -219,7 +272,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                   </div>
                 </>
               )}
-              
+
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   Local Directory Path
@@ -264,6 +317,16 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                 />
               </div>
 
+              {duplicateInfo && (
+                <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm flex items-start gap-2">
+                  <AlertCircle size={18} className="flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-medium">Existing Project Detected</p>
+                    <p className="mt-1">{duplicateInfo.message}</p>
+                  </div>
+                </div>
+              )}
+
               {error && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
                   {error}
@@ -278,20 +341,40 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                 >
                   Cancel
                 </button>
-                <button
-                  onClick={handleAnalyze}
-                  disabled={isAnalyzing || !directoryPath.trim()}
-                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                >
-                  {isAnalyzing ? (
-                    <>
-                      <Loader2 size={16} className="animate-spin" />
-                      Analyzing...
-                    </>
-                  ) : (
-                    'Analyze'
-                  )}
-                </button>
+                {duplicateInfo ? (
+                  <button
+                    onClick={() => {
+                      // Directly import the existing project (activates it)
+                      handleImport();
+                    }}
+                    disabled={isImporting}
+                    className="px-4 py-2 bg-amber-600 text-white rounded-lg hover:bg-amber-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isImporting ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" />
+                        Activating...
+                      </>
+                    ) : (
+                      'Use Existing Project'
+                    )}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleAnalyze}
+                    disabled={isAnalyzing || !directoryPath.trim()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isAnalyzing ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" />
+                        Analyzing...
+                      </>
+                    ) : (
+                      'Analyze'
+                    )}
+                  </button>
+                )}
               </div>
             </div>
           )}

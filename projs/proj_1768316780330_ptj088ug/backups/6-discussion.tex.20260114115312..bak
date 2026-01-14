@@ -1,0 +1,14 @@
+\section{Discussion}
+While FastWrite shows promise, there are several open challenges and limitations worth noting.
+
+\subsection{Limitations}
+\textbf{Context Awareness:} Currently, the AI processes text in relatively small chunks (paragraph or section level). It may miss cross-section inconsistencies (e.g., defining a variable in Section 3 that was used differently in Section 2). Expanding the context window is a priority, but comes with increased latency and cost.
+
+\textbf{PDF Compilation:} FastWrite focuses on the \textit{writing} experience. For final PDF compilation, users still rely on external tools like `latexmk` or Overleaf. We plan to integrate a local PDF previewer using WebAssembly-based Tex engines.
+
+\subsection{Future Work}
+\begin{itemize}
+    \item \textbf{Local LLM Support:} To improved privacy and offline capability, we are experimenting with quantized models (e.g., Llama-3-8B) running locally via Ollama.
+    \item \textbf{Collaboration:} We intend to implement CRDT-based real-time collaboration, allowing multiple authors to edit the same local file via P2P connections.
+    \item \textbf{Git Integration:} Direct integration with GitHub/GitLab to manage version history seamlessly within the UI.
+\end{itemize}

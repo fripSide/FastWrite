@@ -2,7 +2,16 @@
 
 ## Project Overview
 
-FastWrite is a TypeScript + React + Bun web application that provides LLM-powered LaTeX paper editing capabilities. The project follows a monorepo structure with a shared backend API and frontend web UI.
+FastWrite is a TypeScript + React + Bun web application for LLM-powered LaTeX paper editing. It provides granular AI editing capabilities at section, paragraph, and sentence levels with inline word-level diff visualization.
+
+**Key Features:**
+- **Project Import**: Local directory and GitHub repository import with auto-detection of LaTeX structure
+- **Three-Level Granularity**: View and edit at Section, Paragraph, or Sentence level
+- **AI Editing Panel**: Three modes - Diagnose (analyze), Refine (improve), QuickFix (grammar/spelling)
+- **Inline Diff View**: Single-column word-level diff with strikethrough deletions and highlighted additions
+- **LLM Settings**: Configurable API endpoint, key, and model with connection testing
+- **File Tree & Outline**: Natural-sorted file browser with document section navigation
+- **Version Backup**: Automatic backup creation on file save
 
 ## Tech Stack
 
@@ -12,41 +21,40 @@ FastWrite is a TypeScript + React + Bun web application that provides LLM-powere
 - **Styling**: Tailwind CSS 4.1+ via Vite plugin
 - **Icons**: Lucide React
 - **Build Tool**: Vite 7.3+
-- **API**: OpenAI (via `openai` npm package)
+- **API**: OpenAI-compatible (via `openai` npm package)
 
 ---
 
 ## Development Commands
 
+### Quick Start
+
+```bash
+# Start development server (backend + frontend)
+npm run dev
+
+# Frontend at http://localhost:3002, Backend at http://localhost:3003
+```
+
 ### Root Commands (from project root)
 
 ```bash
-# Backend API + Frontend (integrated)
-bun run dev:integrated      # Build frontend and start backend on port 3002
-
-# Backend only
-bun run dev:server         # Start API server at http://localhost:3002
-bun run start               # Start backend (requires pre-built frontend)
-
-# Frontend only
-bun run dev:web            # Start Vite dev server at http://localhost:5173
+# Development
+npm run dev              # Start backend (port 3003) + frontend dev server (port 3002)
 
 # Build
-bun run build               # Build CLI binary
-bun run build:web            # Build frontend to /web/dist
-bun run build:all            # Build both CLI and web
+npm run build            # Build frontend to /web/dist
 
 # Type checking
-bun run typecheck           # TypeScript type check (no emit)
+bun run typecheck        # TypeScript type check (no emit)
 ```
 
 ### Web Commands (from /web directory)
 
 ```bash
-# Development
-bun run dev                 # Start Vite dev server
-bun run build               # tsc + vite build
-bun run preview             # Preview production build
+bun run dev              # Start Vite dev server
+bun run build            # tsc + vite build
+bun run preview          # Preview production build
 ```
 
 ---
@@ -622,11 +630,14 @@ The architecture supports modular development with clear separation of concerns 
 ### Current Implementation Status
 
 The codebase implements:
-- File-specific backup loading and version history
-- Sentence-level LaTeX parsing and diffing
-- AI integration via OpenAI API
-- Three-mode viewing (Section/Paragraph/Sentence) - *in progress*
-- Import functionality - *planned*
+- ✅ Project import (local directory + GitHub) with file structure detection
+- ✅ Natural-sorted file tree and document outline
+- ✅ Three-mode viewing (Section/Paragraph/Sentence)
+- ✅ AI Editor Panel with Diagnose/Refine/QuickFix modes
+- ✅ Inline word-level diff view with Accept button
+- ✅ LLM settings UI with API connection testing
+- ✅ File-specific backup loading and version history
+- ✅ Auto-save with debouncing
 
 ---
 

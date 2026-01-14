@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, Wand2, Zap, Maximize2, Minimize2, Send, Check, Bot, Settings, History, Trash2, X } from 'lucide-react';
+import { Search, Wand2, Zap, Maximize2, Minimize2, Send, Check, Bot, Settings, History, Trash2, X, Cog } from 'lucide-react';
 import type { TextItem, AIMode, DiffResult } from '../types';
 import { computeWordDiff } from '../utils/diff';
 import { api } from '../api';
 import DiffViewer from './DiffViewer';
+import LLMSettingsModal from './LLMSettingsModal';
 
 interface ChatMessage {
   id: string;
@@ -38,6 +39,7 @@ const AIPanel: React.FC<AIPanelProps> = ({
   const [selectedMode, setSelectedMode] = useState<AIMode>('refine');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [showLLMSettings, setShowLLMSettings] = useState(false);
 
   // User input
   const [userPrompt, setUserPrompt] = useState('');
@@ -53,6 +55,12 @@ const AIPanel: React.FC<AIPanelProps> = ({
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
+  // Fullscreen editor ref for auto-resize
+  const fullscreenTextareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Prompt input ref for auto-resize
+  const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
+
   // Load system prompt
   useEffect(() => {
     if (projectId) {
@@ -65,10 +73,43 @@ const AIPanel: React.FC<AIPanelProps> = ({
     resetAIState();
   }, [item?.id]);
 
+  // Auto-resize fullscreen textarea based on content
+  useEffect(() => {
+    if (fullscreenTextareaRef.current && isFullscreen && item) {
+      const textarea = fullscreenTextareaRef.current;
+      // Reset height to auto first to get accurate scrollHeight
+      textarea.style.height = 'auto';
+      const scrollHeight = textarea.scrollHeight;
+      const maxHeight = window.innerHeight * 0.5; // 50vh
+      const minHeight = 150; // minimum height
+      textarea.style.height = `${Math.max(minHeight, Math.min(scrollHeight, maxHeight))}px`;
+    }
+  }, [item?.content, isFullscreen]);
+
+  // Auto-resize prompt textarea
+  useEffect(() => {
+    if (promptTextareaRef.current) {
+      const textarea = promptTextareaRef.current;
+      textarea.style.height = 'auto';
+      const scrollHeight = textarea.scrollHeight;
+      const lineHeight = 20; // approximate line height for text-sm
+      const maxLines = 5;
+      const maxHeight = lineHeight * maxLines + 20; // + padding
+      textarea.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
+      textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden'; // Show scrollbar only if needed
+    }
+  }, [userPrompt]);
+
+  // Update user prompt when mode changes
+  useEffect(() => {
+    setUserPrompt(getDefaultModePrompt(selectedMode));
+  }, [selectedMode]);
+
   const resetAIState = () => {
     setAiResultContent(null);
     setAiExplanation('');
-    setUserPrompt('');
+    setAiExplanation('');
+    setUserPrompt(getDefaultModePrompt(selectedMode));
     setChatHistory([]);
   };
 
@@ -81,11 +122,11 @@ const AIPanel: React.FC<AIPanelProps> = ({
   const getDefaultModePrompt = (mode: AIMode): string => {
     switch (mode) {
       case 'diagnose':
-        return 'Analyze the writing logic, structure, and clarity. Identify issues and suggest improvements.';
+        return 'Analyze and discuss the paper structure, logical flow, and organization. Identify issues and provide constructive feedback.';
       case 'refine':
-        return 'Polish the language, improve expression, and enhance readability while preserving technical content.';
+        return 'Refine the writing: improve structure, remove redundancy, add necessary context, and correct expressions to enhance overall quality.';
       case 'quickfix':
-        return 'Fix grammar, spelling, and punctuation errors. Keep the original meaning intact.';
+        return 'Check grammar, syntax, and spelling without changing the meaning. Return only corrected text.';
     }
   };
 
@@ -194,101 +235,163 @@ const AIPanel: React.FC<AIPanelProps> = ({
 
   return (
     <div className={`border-t-2 border-blue-500 bg-white flex flex-col shadow-lg transition-all ${isFullscreen
-      ? 'fixed inset-0 z-50 h-screen w-screen'
+      ? 'fixed inset-0 z-[100] h-screen w-screen'
       : 'relative w-full mt-2 border-x border-b border-slate-200 rounded-b-lg mb-4'
       }`}>
-      {/* Header Bar */}
-      <div className="flex items-center justify-between px-4 py-2 bg-gradient-to-r from-blue-50 to-white border-b border-slate-200">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-            <h3 className="text-sm font-bold text-slate-800">AI Editor</h3>
-          </div>
 
-          {/* Mode selector */}
-          <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
-            {(['diagnose', 'refine', 'quickfix'] as AIMode[]).map((mode) => (
+      {/* Fullscreen Editor Mode - Simplified with integrated controls */}
+      {isFullscreen && item && (
+        <div className="flex flex-col overflow-hidden">
+          <div className="px-4 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between flex-shrink-0">
+            <div className="flex items-center gap-4">
+              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Editing Content
+              </span>
+              {/* Mode selector in fullscreen */}
+              <div className="flex items-center gap-1 bg-white rounded-lg p-1 shadow-sm border border-slate-200">
+                {(['diagnose', 'refine', 'quickfix'] as AIMode[]).map((mode) => (
+                  <button
+                    key={mode}
+                    onClick={() => setSelectedMode(mode)}
+                    className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${selectedMode === mode
+                      ? 'bg-blue-500 text-white'
+                      : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50'
+                      }`}
+                  >
+                    {getIconForMode(mode)}
+                    {getModeLabel(mode)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {/* History Toggle */}
               <button
-                key={mode}
-                onClick={() => setSelectedMode(mode)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${selectedMode === mode
-                  ? 'bg-white shadow-sm text-slate-800'
-                  : 'text-slate-500 hover:text-slate-700'
+                onClick={() => setShowHistory(!showHistory)}
+                className={`flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium transition-all ${showHistory ? 'bg-blue-100 text-blue-700' : 'hover:bg-slate-100 text-slate-600'
                   }`}
               >
-                {getIconForMode(mode)}
-                {getModeLabel(mode)}
+                <History size={14} />
+                History ({chatHistory.length})
               </button>
-            ))}
+
+              {/* Clear Context */}
+              {chatHistory.length > 0 && (
+                <button
+                  onClick={handleClearContext}
+                  className="flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-medium hover:bg-red-50 text-red-600 transition-all"
+                  title="Clear conversation history"
+                >
+                  <Trash2 size={14} />
+                  Clear Context
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setIsFullscreen(false);
+                  onFullscreenChange?.(false);
+                }}
+                className="px-3 py-1.5 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors text-sm"
+              >
+                Exit Fullscreen
+              </button>
+            </div>
+          </div>
+          <textarea
+            ref={fullscreenTextareaRef}
+            value={item.content}
+            onChange={(e) => onContentChange?.(e.target.value)}
+            className="w-full p-6 text-base font-mono focus:outline-none resize-none overflow-auto"
+            style={{ minHeight: '100px' }}
+            placeholder="Edit content here..."
+          />
+        </div>
+      )}
+
+      {/* Header Bar with Mode Selector - Hidden in fullscreen */}
+      {!isFullscreen && (
+        <div className="flex items-center justify-between px-4 py-2 bg-gradient-to-r from-blue-50 to-white border-b border-slate-200">
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
+              <h3 className="text-sm font-bold text-slate-800">AI Editor</h3>
+            </div>
+
+            {/* Mode selector */}
+            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-1">
+              {(['diagnose', 'refine', 'quickfix'] as AIMode[]).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => setSelectedMode(mode)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${selectedMode === mode
+                    ? 'bg-white shadow-sm text-slate-800'
+                    : 'text-slate-500 hover:text-slate-700'
+                    }`}
+                >
+                  {getIconForMode(mode)}
+                  {getModeLabel(mode)}
+                </button>
+              ))}
+            </div>
+
+            {/* History Toggle */}
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${showHistory ? 'bg-blue-100 text-blue-700' : 'hover:bg-slate-100 text-slate-600'
+                }`}
+            >
+              <History size={14} />
+              History ({chatHistory.length})
+            </button>
+
+            {/* Clear Context */}
+            {chatHistory.length > 0 && (
+              <button
+                onClick={handleClearContext}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium hover:bg-red-50 text-red-600 transition-all"
+                title="Clear conversation history"
+              >
+                <Trash2 size={14} />
+                Clear Context
+              </button>
+            )}
           </div>
 
-          {/* History Toggle */}
-          <button
-            onClick={() => setShowHistory(!showHistory)}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all ${showHistory ? 'bg-blue-100 text-blue-700' : 'hover:bg-slate-100 text-slate-600'
-              }`}
-          >
-            <History size={14} />
-            History ({chatHistory.length})
-          </button>
-
-          {/* Clear Context */}
-          {chatHistory.length > 0 && (
+          <div className="flex items-center gap-2">
             <button
-              onClick={handleClearContext}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium hover:bg-red-50 text-red-600 transition-all"
-              title="Clear conversation history"
+              onClick={() => setShowLLMSettings(true)}
+              className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-slate-500"
+              title="LLM Settings"
             >
-              <Trash2 size={14} />
-              Clear Context
+              <Cog size={18} />
             </button>
-          )}
+            <button
+              onClick={() => {
+                const newFullscreen = !isFullscreen;
+                setIsFullscreen(newFullscreen);
+                onFullscreenChange?.(newFullscreen);
+              }}
+              className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-slate-500"
+              title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
+            >
+              {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
+            </button>
+            <button
+              onClick={() => {
+                onClose();
+                onFullscreenChange?.(false);
+              }}
+              className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition-colors"
+              title="Close AI Panel"
+            >
+              <X size={18} />
+            </button>
+          </div>
         </div>
-
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              const newFullscreen = !isFullscreen;
-              setIsFullscreen(newFullscreen);
-              onFullscreenChange?.(newFullscreen);
-            }}
-            className="p-1.5 hover:bg-slate-100 rounded-md transition-colors text-slate-500"
-            title={isFullscreen ? "Exit Fullscreen" : "Fullscreen"}
-          >
-            {isFullscreen ? <Minimize2 size={18} /> : <Maximize2 size={18} />}
-          </button>
-          <button
-            onClick={() => {
-              onClose();
-              onFullscreenChange?.(false);
-            }}
-            className="p-1.5 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded-md transition-colors"
-            title="Close AI Panel"
-          >
-            <X size={18} />
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Main Content Area - Split Vertical */}
       <div className={`flex flex-col flex-1 ${isFullscreen ? '' : 'min-h-[250px]'}`}>
-
-        {/* Fullscreen Editor Mode - Only visible when maximized */}
-        {isFullscreen && item && (
-          <div className="flex-1 flex flex-col border-b border-slate-200 min-h-[300px]">
-            <div className="px-3 py-2 bg-slate-50 border-b border-slate-100 flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-                Fullscreen Editor
-              </span>
-            </div>
-            <textarea
-              value={item.content}
-              onChange={(e) => onContentChange?.(e.target.value)}
-              className="flex-1 w-full p-6 text-base font-mono focus:outline-none resize-none overflow-auto"
-              placeholder="Edit content here..."
-            />
-          </div>
-        )}
 
         {/* TOP: Prompt Input */}
         <div className="flex-initial p-3 border-b border-slate-200 bg-white">
@@ -310,6 +413,7 @@ const AIPanel: React.FC<AIPanelProps> = ({
           </div>
           <div className="flex gap-2">
             <textarea
+              ref={promptTextareaRef}
               value={userPrompt}
               onChange={(e) => setUserPrompt(e.target.value)}
               onKeyDown={(e) => {
@@ -319,9 +423,9 @@ const AIPanel: React.FC<AIPanelProps> = ({
                 }
               }}
               placeholder={`Ask AI to ${getModeLabel(selectedMode).toLowerCase()} the selected content...`}
-              className="flex-1 p-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:outline-none resize-none"
+              className="flex-1 p-2.5 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent focus:outline-none resize-none overflow-hidden"
               rows={1}
-              style={{ minHeight: '42px', maxHeight: '100px' }}
+              style={{ minHeight: '42px' }} // Let auto-resize handle max-height
             />
             <button
               onClick={handleRunAI}
@@ -342,37 +446,45 @@ const AIPanel: React.FC<AIPanelProps> = ({
         {aiResultContent && diff && (
           <div className="flex-1 flex flex-col overflow-hidden bg-white border-t border-slate-200">
             <div className="px-3 py-2 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
-              <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider">
-                Suggested Changes (Diff)
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-blue-600 mr-2">
-                  {aiExplanation && aiExplanation.length > 50 ? aiExplanation.substring(0, 50) + '...' : aiExplanation}
+              <div className="flex items-center gap-4">
+                <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider">
+                  Suggested Changes
                 </span>
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 bg-red-100 border border-red-300 rounded"></span>
+                    Del
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-2.5 h-2.5 bg-green-100 border border-green-300 rounded"></span>
+                    Add
+                  </span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
                 <button
-                  onClick={() => {
-                    setAiResultContent(null);
-                  }}
-                  className="text-xs text-slate-500 hover:text-slate-700 px-3 py-1.5"
+                  onClick={() => setAiResultContent(null)}
+                  className="text-xs text-slate-500 hover:text-slate-700 px-2 py-1 hover:bg-slate-100 rounded transition-colors"
                 >
                   Discard
                 </button>
                 <button
                   onClick={handleApplyAIResult}
-                  className="text-xs bg-blue-600 text-white px-3 py-1.5 rounded-md hover:bg-blue-700 transition-colors flex items-center gap-1"
+                  className="px-3 py-1 bg-green-600 text-white text-xs font-medium rounded hover:bg-green-700 transition-colors flex items-center gap-1"
                 >
                   <Check size={12} />
-                  Accept Changes
+                  Accept
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-auto p-2 min-h-[150px]">
+            <div className="flex-1 overflow-auto min-h-[150px]">
               <DiffViewer
                 originalContent={item?.content || ''}
                 modifiedContent={aiResultContent}
                 diff={diff}
                 onAccept={handleApplyAIResult}
                 onReject={() => setAiResultContent(null)}
+                hideHeader={true}
               />
             </div>
           </div>
@@ -431,6 +543,12 @@ const AIPanel: React.FC<AIPanelProps> = ({
           </div>
         </div>
       )}
+
+      {/* LLM Settings Modal */}
+      <LLMSettingsModal
+        isOpen={showLLMSettings}
+        onClose={() => setShowLLMSettings(false)}
+      />
     </div>
   );
 };

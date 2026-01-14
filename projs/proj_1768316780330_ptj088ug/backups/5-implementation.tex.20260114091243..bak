@@ -1,0 +1,30 @@
+\section{Implementation Details}
+We implemented FastWrite as a desktop-class web application. The tech stack was chosen for performance and developer experience.
+
+\subsection{Frontend Engineering}
+The frontend is built with \textbf{React 18} and \textbf{TypeScript}, utilizing \textbf{Vite} for lightning-fast builds. We employ \textbf{Tailwind CSS} for a utility-first styling approach, ensuring a consistent design system.
+\begin{itemize}
+    \item \textbf{State Management:} We use React Context for global state (project selection, user preferences) and local state for editor interactions.
+    \item \textbf{Editor Component:} A custom virtualized textarea handles large LaTeX files without UI stuttering, a common issue in browser-based editors.
+\end{itemize}
+
+\subsection{Backend Services}
+The local server is powered by \textbf{Bun}, a modern JavaScript runtime. Bun's native WebSocket support allows for sub-millisecond latency when syncing file changes or streaming AI responses.
+\begin{code}
+// Example Bun server setup
+Bun.serve({
+  port: 3000,
+  fetch(req) {
+    if (server.upgrade(req)) return;
+    return new Response("FastWrite Server");
+  },
+});
+\end{code}
+
+\subsection{AI Orchestration}
+We use a proxy layer to manage interactions with LLM providers (e.g., OpenAI, Anthropic). This layer handles:
+\begin{enumerate}
+    \item \textbf{Prompt Injection:} Automatically prepending the system prompt defined in the project settings.
+    \item \textbf{Context Pruning:} Selecting only the relevant text chunk (Section, Paragraph, or Sentence) to minimize token usage.
+    \item \textbf{Response Parsing:} Cleaning up markdown formatting from the LLM output before inserting it back into the editor.
+\end{enumerate}
