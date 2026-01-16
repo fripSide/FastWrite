@@ -266,7 +266,7 @@ function App() {
 
         {/* Sidebar resize handle */}
         <div
-          className={`shrink-0 cursor-col-resize flex flex-col items-center justify-center relative group/sidebar transition-colors ${sidebarWidth === 0 ? 'w-4 bg-slate-100 hover:bg-slate-200' : 'w-1'} ${isResizingSidebar ? 'bg-blue-500' : sidebarWidth > 0 ? 'bg-slate-200 hover:bg-slate-300' : ''}`}
+          className={`shrink-0 cursor-col-resize flex flex-col items-center justify-center relative group/sidebar transition-colors z-10 ${sidebarWidth === 0 ? 'w-4 bg-slate-100 hover:bg-slate-200' : 'w-1'} ${isResizingSidebar ? 'bg-blue-500' : sidebarWidth > 0 ? 'bg-slate-200 hover:bg-slate-300' : ''}`}
           onMouseDown={(e) => {
             if (!(e.target as HTMLElement).closest('button')) {
               setIsResizingSidebar(true);
