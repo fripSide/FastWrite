@@ -266,7 +266,7 @@ function App() {
 
         {/* Sidebar resize handle */}
         <div
-          className={`shrink-0 cursor-col-resize flex flex-col items-center justify-center relative group/sidebar transition-colors z-10 ${sidebarWidth === 0 ? 'w-4 bg-slate-100 hover:bg-slate-200' : 'w-1'} ${isResizingSidebar ? 'bg-blue-500' : sidebarWidth > 0 ? 'bg-slate-200 hover:bg-slate-300' : ''}`}
+          className={`shrink-0 w-1 cursor-col-resize flex flex-col items-center justify-center relative group/sidebar transition-colors z-10 ${isResizingSidebar ? 'bg-blue-500' : 'bg-slate-200 hover:bg-slate-300'}`}
           onMouseDown={(e) => {
             if (!(e.target as HTMLElement).closest('button')) {
               setIsResizingSidebar(true);
@@ -280,12 +280,10 @@ function App() {
             <div className="w-0.5 h-0.5 rounded-full bg-slate-400" />
           </div>
 
-
-
-          {/* Collapse button - larger when collapsed */}
+          {/* Collapse/Expand button */}
           <button
             onClick={() => setSidebarWidth(prev => prev > 0 ? 0 : 200)}
-            className={`flex items-center justify-center rounded-sm bg-slate-300 text-slate-500 hover:bg-green-500 hover:text-white transition-all ${sidebarWidth === 0 ? 'w-5 h-10 text-xs' : 'w-3 h-8 text-[8px]'}`}
+            className="w-4 h-8 flex items-center justify-center rounded-sm bg-slate-300 text-slate-500 hover:bg-green-500 hover:text-white transition-all text-[8px]"
             title={sidebarWidth > 0 ? 'Collapse' : 'Expand'}
           >
             {sidebarWidth > 0 ? '◀' : '▶'}
