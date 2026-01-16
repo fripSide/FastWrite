@@ -22,7 +22,7 @@ export async function loadProjects(): Promise<ProjectMetadata[]> {
   if (!existsSync(PROJS_DIR)) {
     mkdirSync(PROJS_DIR, { recursive: true });
   }
-  
+
   if (!existsSync(PROJECTS_FILE)) {
     writeFileSync(PROJECTS_FILE, '[]', 'utf-8');
     return [];
@@ -41,10 +41,10 @@ async function saveProjects(projects: ProjectMetadata[]): Promise<void> {
 
 export async function createProject(name: string, localPath: string): Promise<ProjectMetadata> {
   const projects = await loadProjects();
-  
+
   const normalizedPath = localPath.replace(/\/+$/, '');
   const projectName = name || basename(normalizedPath);
-  
+
   const existing = projects.find(p => p.localPath.replace(/\/+$/, '') === normalizedPath);
   if (existing) {
     if (existing.name !== projectName) {
@@ -54,11 +54,11 @@ export async function createProject(name: string, localPath: string): Promise<Pr
     await setActiveProject(existing.id);
     return existing;
   }
-  
+
   if (!existsSync(localPath)) {
     throw new Error(`Directory does not exist: ${localPath}`);
   }
-  
+
   const stats = statSync(localPath);
   if (!stats.isDirectory()) {
     throw new Error(`Path is not a directory: ${localPath}`);
@@ -68,7 +68,7 @@ export async function createProject(name: string, localPath: string): Promise<Pr
   const projectDir = join(PROJS_DIR, projectId);
   const backupsDir = join(projectDir, 'backups');
   const aiCacheDir = join(projectDir, 'ai-cache');
-  
+
   mkdirSync(projectDir, { recursive: true });
   mkdirSync(backupsDir, { recursive: true });
   mkdirSync(aiCacheDir, { recursive: true });
@@ -76,12 +76,28 @@ export async function createProject(name: string, localPath: string): Promise<Pr
   const files = readdirSync(localPath);
   const texFiles = files.filter(f => f.endsWith('.tex'));
 
+  // Auto-detect main file: find tex file with \documentclass in root directory
+  let mainFile: string | undefined;
+  for (const f of texFiles) {
+    try {
+      const content = readFileSync(join(localPath, f), 'utf-8');
+      if (content.includes('\\documentclass')) {
+        mainFile = f;
+        break;
+      }
+    } catch { /* ignore read errors */ }
+  }
+  // Fallback to common filenames if no documentclass found
+  if (!mainFile) {
+    mainFile = texFiles.find(f => ['main.tex', 'paper.tex', 'document.tex'].includes(basename(f)));
+  }
+
   const config: ProjectConfig = {
     projectId,
     sectionsDir: normalizedPath,
     backupsDir,
     bibFiles: [],
-    mainFile: texFiles.find(f => ['main.tex', 'paper.tex', 'document.tex'].includes(basename(f)))
+    mainFile
   };
 
   writeFileSync(join(projectDir, 'config.json'), JSON.stringify(config, null, 2), 'utf-8');
@@ -105,7 +121,7 @@ export async function createProject(name: string, localPath: string): Promise<Pr
 
 export async function getProjectConfig(projectId: string): Promise<ProjectConfig | null> {
   const configPath = join(PROJS_DIR, projectId, 'config.json');
-  
+
   if (!existsSync(configPath)) {
     return null;
   }
@@ -117,16 +133,33 @@ export async function getProjectConfig(projectId: string): Promise<ProjectConfig
   }
 }
 
+export async function updateProjectConfig(projectId: string, updates: Partial<ProjectConfig>): Promise<ProjectConfig | null> {
+  const configPath = join(PROJS_DIR, projectId, 'config.json');
+
+  if (!existsSync(configPath)) {
+    return null;
+  }
+
+  try {
+    const current = JSON.parse(readFileSync(configPath, 'utf-8'));
+    const updated = { ...current, ...updates };
+    writeFileSync(configPath, JSON.stringify(updated, null, 2), 'utf-8');
+    return updated;
+  } catch {
+    return null;
+  }
+}
+
 export async function deleteProject(projectId: string): Promise<boolean> {
   const projects = await loadProjects();
   const filtered = projects.filter(p => p.id !== projectId);
-  
+
   if (filtered.length === projects.length) {
     return false;
   }
 
   await saveProjects(filtered);
-  
+
   try {
     const projectDir = join(PROJS_DIR, projectId);
     if (existsSync(projectDir)) {
@@ -141,14 +174,14 @@ export async function deleteProject(projectId: string): Promise<boolean> {
 export async function setActiveProject(projectId: string): Promise<boolean> {
   const projects = await loadProjects();
   const project = projects.find(p => p.id === projectId);
-  
+
   if (!project) return false;
-  
+
   const updated = projects.map(p => ({
     ...p,
     status: (p.id === projectId ? 'active' : 'archived') as 'active' | 'archived'
   }));
-  
+
   await saveProjects(updated);
   return true;
 }
