@@ -142,6 +142,7 @@ function parseSynctexContent(content: string): SyncTexData {
 
 /**
  * Parse a single block line
+ * Format: {type}{tag},{line}:{h},{v}:{other values} or {type}{tag},{line},{column}
  */
 function parseBlockLine(line: string, currentPage: number): SyncTexBlock | null {
 	const type = line[0] as SyncTexBlock['type'];
@@ -149,40 +150,31 @@ function parseBlockLine(line: string, currentPage: number): SyncTexBlock | null 
 
 	const block: SyncTexBlock = { type, page: currentPage };
 
-	// Parse comma-separated values
-	const parts = rest.split(',');
+	// Split by : first to separate tag,line from coordinates
+	const colonParts = rest.split(':');
 
-	for (const part of parts) {
-		const colonIdx = part.indexOf(':');
-		if (colonIdx > 0) {
-			const key = part.substring(0, colonIdx);
-			const value = parseInt(part.substring(colonIdx + 1), 10);
-
-			switch (key) {
-				case 'h': block.h = value; break;
-				case 'v': block.v = value; break;
-				case 'w': block.w = value; break;
-				case 'W': block.W = value; break;
-				case 'H': block.H = value; break;
-				case 'd': block.d = value; break;
-			}
-		} else {
-			// No colon - depends on block type
-			// For most blocks: tag,line,column
-			const numMatch = part.match(/^(\d+)/);
-			if (numMatch && numMatch[1] && !block.tag) {
-				block.tag = parseInt(numMatch[1], 10);
-			}
+	// First part contains tag,line (e.g., "62,12" from "h62,12:...")
+	if (colonParts[0]) {
+		const tagLineParts = colonParts[0].split(',');
+		if (tagLineParts[0]) {
+			block.tag = parseInt(tagLineParts[0], 10);
+		}
+		if (tagLineParts[1]) {
+			block.line = parseInt(tagLineParts[1], 10);
+		}
+		if (tagLineParts[2]) {
+			block.column = parseInt(tagLineParts[2], 10);
 		}
 	}
 
-	// Simple parsing for tag:line format
-	const simpleMatch = rest.match(/^(\d+),(\d+)(?:,(\d+))?/);
-	if (simpleMatch && simpleMatch[1] && simpleMatch[2]) {
-		block.tag = parseInt(simpleMatch[1], 10);
-		block.line = parseInt(simpleMatch[2], 10);
-		if (simpleMatch[3]) {
-			block.column = parseInt(simpleMatch[3], 10);
+	// Second part contains h,v coordinates (e.g., "4736286,4736286" from ":4736286,4736286:0,0,0")
+	if (colonParts[1]) {
+		const hvParts = colonParts[1].split(',');
+		if (hvParts[0]) {
+			block.h = parseInt(hvParts[0], 10);
+		}
+		if (hvParts[1]) {
+			block.v = parseInt(hvParts[1], 10);
 		}
 	}
 
@@ -263,16 +255,26 @@ export function sourceToPdf(
 	filePath: string,
 	line: number
 ): { page: number; x: number; y: number } | null {
+	// Normalize file path (remove ./ and resolve)
+	const normalizeP = (p: string) => p.replace(/\/\.\//g, '/').replace(/^\.\//g, '');
+	const normalizedFilePath = normalizeP(filePath);
+	const fileBasename = basename(filePath);
+
 	// Find tag for file
 	let fileTag: number | undefined;
 	for (const [tag, path] of synctexData.inputs.entries()) {
-		if (path.endsWith(basename(filePath)) || filePath.endsWith(path)) {
+		const normalizedSyncPath = normalizeP(path);
+		// Match by: same basename, or normalized paths end with each other
+		if (basename(path) === fileBasename ||
+			normalizedSyncPath.endsWith(normalizedFilePath) ||
+			normalizedFilePath.endsWith(normalizedSyncPath)) {
 			fileTag = tag;
 			break;
 		}
 	}
 
 	if (fileTag === undefined) {
+		console.log('[synctex] No file tag found for:', filePath, 'Available inputs:', Array.from(synctexData.inputs.values()).slice(0, 5));
 		return null;
 	}
 
