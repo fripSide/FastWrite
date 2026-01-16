@@ -49,6 +49,7 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 	const [latexStatus, setLatexStatus] = useState<LatexStatus | null>(null);
 	const [isCheckingLatex, setIsCheckingLatex] = useState(true);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+	const [clickedLocation, setClickedLocation] = useState<{ page: number; x: number; y: number } | null>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 
@@ -148,9 +149,9 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 		setNumPages(numPages);
 	};
 
-	// Handle click on PDF for sync - get clicked page from ref
-	const handlePageClick = async (event: React.MouseEvent<HTMLDivElement>, pageNumber: number) => {
-		if (!onSyncToSource || !pdfUrl) return;
+	// Handle click on PDF - store location for later sync (don't sync immediately)
+	const handlePageClick = (event: React.MouseEvent<HTMLDivElement>, pageNumber: number) => {
+		if (!pdfUrl) return;
 
 		const pageElement = pageRefs.current.get(pageNumber);
 		if (!pageElement) return;
@@ -159,31 +160,11 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 		const x = event.clientX - rect.left;
 		const y = event.clientY - rect.top;
 
-		// Normalize coordinates to PDF units
+		// Normalize coordinates to PDF units and store
 		const pdfX = x / scale;
 		const pdfY = y / scale;
 
-		try {
-			const response = await fetch('/api/latex/synctex', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({
-					projectId,
-					page: pageNumber,
-					x: pdfX,
-					y: pdfY
-				})
-			});
-
-			if (response.ok) {
-				const result = await response.json() as { filePath: string; line: number };
-				if (result.filePath && result.line) {
-					onSyncToSource(result.filePath, result.line);
-				}
-			}
-		} catch (error) {
-			console.error('SyncTeX lookup failed:', error);
-		}
+		setClickedLocation({ page: pageNumber, x: pdfX, y: pdfY });
 	};
 
 	// Expose sync functionality to parent
@@ -195,7 +176,13 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 				return { success: false, message: 'PDF not loaded' };
 			}
 
-			// 1. Try to find the selected text in the PDF
+			// 1. First priority: use stored clicked location
+			if (clickedLocation) {
+				await performSync(clickedLocation.page, clickedLocation.x, clickedLocation.y);
+				return { success: true, message: 'Synced from clicked location' };
+			}
+
+			// 2. Try to find the selected text in the PDF
 			const selection = window.getSelection();
 			if (selection && selection.rangeCount > 0) {
 				const range = selection.getRangeAt(0);
@@ -240,7 +227,7 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 				}
 			}
 
-			// 2. Fallback: Sync from the center of the currently visible viewport
+			// 3. Fallback: Sync from the center of the currently visible viewport
 			// We can use the container's center point
 			if (containerRef.current) {
 				const containerRect = containerRef.current.getBoundingClientRect();
