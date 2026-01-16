@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Folder, FolderOpen, ChevronRight, ChevronDown, FileText, Plus, Trash2, ChevronLeft, Settings, RefreshCw } from 'lucide-react';
+import { Folder, FolderOpen, ChevronRight, ChevronDown, FileText, Plus, Trash2, Settings, RefreshCw } from 'lucide-react';
 import type { Project, FileNode, SelectedProject, SectionNode } from '../types';
 import { api } from '../api';
 import SystemPromptModal from './SystemPromptModal';
@@ -10,6 +10,7 @@ interface SidebarProps {
   onProjectSelect: (project: SelectedProject | null) => void;
   onImportClick: () => void;
   onFileSelect?: (file: FileNode) => void;
+  onProjectDelete?: () => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -18,10 +19,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   onProjectSelect,
   onImportClick,
   onFileSelect,
+  onProjectDelete,
 }) => {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [sections, setSections] = useState<SectionNode[]>([]);
-  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set());
   const [files, setFiles] = useState<FileNode[]>([]);
   const [showSystemPromptModal, setShowSystemPromptModal] = useState(false);
 
@@ -113,39 +114,19 @@ const Sidebar: React.FC<SidebarProps> = ({
     });
   };
 
-  const toggleSection = (sectionId: string): void => {
-    setExpandedSections(prev => {
-      const newSet = new Set(prev);
-      if (newSet.has(sectionId)) {
-        newSet.delete(sectionId);
-      } else {
-        newSet.add(sectionId);
-      }
-      return newSet;
-    });
-  };
-
-  const handleFileClick = async (file: FileNode, projectId: string): Promise<void> => {
-    if (selectedProject?.project.id === projectId) {
-      try {
-        const response = await fetch(`/api/files/${encodeURIComponent(file.path)}?projectId=${projectId}`);
-        if (response.ok) {
-          const data = await response.json();
-          if (data.sections) {
-            setSections(data.sections);
-          }
-        }
-      } catch (error) {
-        console.error('Failed to load file:', error);
-      }
-    }
-  };
-
   const handleDeleteProject = async (projectId: string): Promise<void> => {
+    const project = projects.find(p => p.id === projectId);
+    const projectName = project?.name || 'this project';
+
+    if (!confirm(`Are you sure you want to delete "${projectName}"? This will remove it from FastWrite (files on disk will not be deleted).`)) {
+      return;
+    }
+
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}`, { method: 'DELETE' });
       if (response.ok) {
         onProjectSelect(null);
+        onProjectDelete?.();
       }
     } catch (error) {
       console.error('Failed to delete project:', error);
@@ -173,17 +154,19 @@ const Sidebar: React.FC<SidebarProps> = ({
         >
           {node.type === 'folder' ? (
             <>
-              {expandedFolders.has(node.id) ? (
-                <ChevronDown size={14} className="text-slate-500" />
-              ) : (
-                <ChevronRight size={14} className="text-slate-500" />
-              )}
-              <Folder size={16} className="text-blue-500" />
+              <span className="w-3.5 flex items-center justify-center shrink-0">
+                {expandedFolders.has(node.id) ? (
+                  <ChevronDown size={14} className="text-slate-500" />
+                ) : (
+                  <ChevronRight size={14} className="text-slate-500" />
+                )}
+              </span>
+              <Folder size={16} className="text-blue-500 shrink-0" />
             </>
           ) : (
             <>
-              <span className="w-4" />
-              <FileText size={16} className={node.isLaTeX ? 'text-blue-500' : 'text-slate-500'} />
+              <span className="w-3.5 shrink-0" />
+              <FileText size={16} className={`shrink-0 ${node.isLaTeX ? 'text-blue-500' : 'text-slate-500'}`} />
             </>
           )}
           <span className="text-sm text-slate-700 truncate">{node.name}</span>
@@ -199,37 +182,28 @@ const Sidebar: React.FC<SidebarProps> = ({
     <>
       <div
         ref={sidebarRef}
-        className="h-full flex flex-col bg-slate-50 border-r border-slate-200 relative group"
-        style={{ width: sidebarWidth, flexShrink: 0 }}
+        className="h-full w-full flex flex-col bg-slate-50 border-r border-slate-200 overflow-hidden"
       >
-        {/* Resize Handle - Wider hit area */}
-        <div
-          className={`absolute -right-2 top-0 w-4 h-full cursor-col-resize z-50 flex justify-center group/handle`}
-          onMouseDown={startResizing}
-        >
-          <div className={`w-0.5 h-full transition-colors ${isResizing ? 'bg-blue-500' : 'group-hover/handle:bg-blue-400/50'}`} />
-        </div>
-        <div className="border-b border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between px-4 py-3">
+        <div className="border-b border-slate-200 bg-white shadow-sm shrink-0 h-10 flex items-center">
+          <div className="flex items-center justify-between px-3 w-full">
             <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <FolderOpen size={18} className="text-blue-500" />
+              <FolderOpen size={16} className="text-blue-500" />
               Papers
             </h2>
             <div className="flex gap-1">
               <button
                 onClick={refreshProjectFiles}
-                className="p-2 text-slate-500 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                className="p-1.5 text-slate-500 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
                 title="Refresh Files"
               >
-                <RefreshCw size={16} />
+                <RefreshCw size={14} />
               </button>
               <button
                 onClick={onImportClick}
-                className={`flex items-center gap-2 px-3 py-2 bg-blue-500 text-white text-sm font-medium rounded-lg hover:bg-blue-600 transition-colors ${sidebarWidth < 260 ? 'w-9 justify-center' : ''}`}
+                className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
                 title="Import Paper"
               >
-                <Plus size={16} />
-                {sidebarWidth >= 260 && <span>Import Paper</span>}
+                <Plus size={14} />
               </button>
             </div>
           </div>
@@ -330,8 +304,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                 {sections.map(section => (
                   <div
                     key={section.id}
-                    className={`p-3 border-l-4 ${expandedSections.has(section.id) ? 'border-blue-200' : 'border-transparent'
-                      }`}
+                    className="p-3 border-l-4 border-transparent"
                   >
                     <div className="flex items-start gap-3">
                       <span className="text-sm font-medium text-slate-800">

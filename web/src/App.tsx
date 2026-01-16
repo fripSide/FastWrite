@@ -283,7 +283,7 @@ function App() {
           {/* Collapse/Expand button */}
           <button
             onClick={() => setSidebarWidth(prev => prev > 0 ? 0 : 200)}
-            className="w-4 h-8 flex items-center justify-center rounded-sm bg-slate-300 text-slate-500 hover:bg-green-500 hover:text-white transition-all text-[8px]"
+            className="w-3 h-8 flex items-center justify-center rounded-sm bg-slate-300 text-slate-500 hover:bg-green-500 hover:text-white transition-all text-[8px]"
             title={sidebarWidth > 0 ? 'Collapse' : 'Expand'}
           >
             {sidebarWidth > 0 ? '◀' : '▶'}
