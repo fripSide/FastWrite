@@ -310,7 +310,7 @@ function App() {
         {/* PDF resize handle */}
         {selectedProject && (
           <div
-            className={`shrink-0 w-1 cursor-col-resize flex flex-col items-center justify-center relative group/pdf transition-colors ${isResizingPdf ? 'bg-blue-500' : 'bg-slate-200 hover:bg-slate-300'}`}
+            className={`shrink-0 w-1 cursor-col-resize flex flex-col items-center justify-center relative group/pdf transition-colors z-10 ${isResizingPdf ? 'bg-blue-500' : 'bg-slate-200 hover:bg-slate-300'}`}
             onMouseDown={(e) => {
               if (!(e.target as HTMLElement).closest('button')) {
                 setIsResizingPdf(true);
