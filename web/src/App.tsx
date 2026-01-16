@@ -216,11 +216,48 @@ function App() {
     loadProjects();
   };
 
-  // Handle PDF-to-source sync
-  const handleSyncToSource = useCallback((filePath: string, line: number) => {
-    setScrollToLine(line);
-    setTimeout(() => setScrollToLine(null), 100);
-  }, []);
+  // Handle PDF-to-source sync - load file if needed, then scroll to line
+  const handleSyncToSource = useCallback(async (filePath: string, line: number) => {
+    if (!selectedProject) return;
+
+    const normalizedPath = filePath.replace(/\/\.\//g, '/');
+    const currentPath = selectedFile?.path || '';
+
+    // Check if we need to load a different file
+    const isSameFile = currentPath === normalizedPath ||
+      currentPath.endsWith(normalizedPath.split('/').pop() || '') ||
+      normalizedPath.endsWith(currentPath.split('/').pop() || '');
+
+    if (!isSameFile || !selectedFile) {
+      // Need to load the file first
+      try {
+        const projectId = selectedProject.project.id;
+        const response = await fetch(`/api/files/${encodeURIComponent(normalizedPath)}?projectId=${encodeURIComponent(projectId)}`);
+
+        if (response.ok) {
+          const data = await response.json();
+          const fileName = normalizedPath.split('/').pop() || 'file.tex';
+          setSelectedFile({
+            id: `file_${Date.now()}`,
+            name: fileName,
+            path: normalizedPath,
+            content: data.content
+          });
+          // After file loads, scroll to line (with delay to allow render)
+          setTimeout(() => {
+            setScrollToLine(line);
+            setTimeout(() => setScrollToLine(null), 100);
+          }, 200);
+        }
+      } catch (error) {
+        console.error('Failed to load file for sync:', error);
+      }
+    } else {
+      // Same file, just scroll
+      setScrollToLine(line);
+      setTimeout(() => setScrollToLine(null), 100);
+    }
+  }, [selectedProject, selectedFile]);
 
   // Get main tex path from config (or fall back to selected file)
   const mainTexPath = useMemo(() => {

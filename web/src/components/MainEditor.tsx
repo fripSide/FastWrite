@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { ChevronDown, ChevronRight, FileText, Clock, FolderOpen, Check, Loader2 } from 'lucide-react';
 import type { SelectedFile, SelectedProject, ViewMode, TextItem, DiffResult, AIMode } from '../types';
 import { parseContent } from '../utils/parser';
@@ -6,12 +6,18 @@ import AIEditorPanel from './AIEditorPanel';
 import BackupTimeline from './BackupTimeline';
 import { api } from '../api';
 
+export interface MainEditorRef {
+  getCurrentLine: () => number;
+}
+
 interface MainEditorProps {
   selectedFile: SelectedFile | null;
   selectedProject: SelectedProject | null;
+  scrollToLine?: number | null;
+  onSyncToPDF?: (page: number, x: number, y: number) => void;
 }
 
-const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }) => {
+const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, selectedProject, scrollToLine, onSyncToPDF }, ref) => {
   const [viewMode, setViewMode] = useState<ViewMode>('section');
   const [items, setItems] = useState<TextItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<TextItem | null>(null);
@@ -19,6 +25,8 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
   const [showBackupTimeline, setShowBackupTimeline] = useState(false);
   const [currentContent, setCurrentContent] = useState<string>('');
   const [isAIPanelFullscreen, setIsAIPanelFullscreen] = useState(false);
+
+  const editorContainerRef = useRef<HTMLDivElement>(null);
 
   // Auto-save state
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -62,7 +70,6 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
   // Auto-scroll selected item to bottom of view
   useEffect(() => {
     if (selectedItem) {
-      // Small timeout to allow layout to adjust
       setTimeout(() => {
         const el = document.getElementById(`item-${selectedItem.id}`);
         if (el) {
@@ -82,6 +89,74 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
     }
   }, [selectedFile, viewMode]);
 
+  const flattenItems = (items: TextItem[]): TextItem[] => {
+    const result: TextItem[] = [];
+    for (const item of items) {
+      result.push(item);
+      if (item.children) {
+        result.push(...flattenItems(item.children));
+      }
+    }
+    return result;
+  };
+
+  // Expose current line for external sync triggering
+  useImperativeHandle(ref, () => ({
+    getCurrentLine: () => {
+      // 1. If an item is selected, use its line
+      if (selectedItem?.lineStart) {
+        return selectedItem.lineStart;
+      }
+
+      // 2. If valid items exist, try to find the first visible one
+      // (Simplified: just return the first item's line or 1 for now)
+      if (items.length > 0) {
+        // Ideally we check which item is in viewport, but for now defaulting to top or first item
+        // If user hasn't selected anything, they are likely reading from top or just scrolled.
+        // A better heuristic might be needed later (IntersectionObserver on text items).
+        return items[0]?.lineStart || 1;
+      }
+
+      return 1;
+    }
+  }));
+
+  // Handle scroll to line from PDF sync - also select the item
+  useEffect(() => {
+    if (scrollToLine && items.length > 0) {
+      const flatItems = flattenItems(items);
+      // Find the item containing this line (reversed to find closest match)
+      const targetItem = [...flatItems].reverse().find(item => {
+        if (item.lineStart) {
+          return item.lineStart <= scrollToLine;
+        }
+        return false;
+      });
+
+      if (targetItem) {
+        // Expand parent section if collapsed
+        if (targetItem.parentId) {
+          setExpandedSections(prev => new Set([...prev, targetItem.parentId!]));
+        }
+
+        // Select the item (focus it)
+        setSelectedItem(targetItem);
+
+        // Scroll into view with highlight
+        setTimeout(() => {
+          const el = document.getElementById(`item-${targetItem.id}`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2');
+            setTimeout(() => {
+              el.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2');
+            }, 2000);
+          }
+        }, 100);
+      }
+    }
+  }, [scrollToLine, items]);
+
   const toggleSection = (itemId: string) => {
     setExpandedSections(prev => {
       const next = new Set(prev);
@@ -96,6 +171,34 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
 
   const handleItemClick = (item: TextItem) => {
     setSelectedItem(item);
+  };
+
+  const handleSyncToPDF = async (item: TextItem) => {
+    if (!selectedProject || !selectedFile || !onSyncToPDF) return;
+
+    // Check if lineStart exists on item
+    const line = item.lineStart || 1;
+
+    try {
+      const response = await fetch('/api/latex/forward-synctex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: selectedProject.project.id,
+          file: selectedFile.path,
+          line: line
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.page) {
+          onSyncToPDF(result.page, result.x, result.y);
+        }
+      }
+    } catch (error) {
+      console.error('SyncTeX forward search failed:', error);
+    }
   };
 
   const handleContentUpdate = (itemId: string, newContent: string) => {
@@ -114,9 +217,29 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
     setItems(updatedItems);
     setSelectedItem(prev => prev?.id === itemId ? { ...prev, content: newContent } : prev);
 
-    // Compute full file content and schedule auto-save
     const fullContent = updatedItems.map(i => i.content).join('\n');
     scheduleSave(fullContent);
+  };
+
+  const handleSaveChanges = async (newContent: string): Promise<void> => {
+    if (!selectedFile || !selectedProject) return;
+
+    try {
+      const projectId = selectedProject.project.id;
+      const response = await fetch(`/api/files/${encodeURIComponent(selectedFile.path)}?projectId=${encodeURIComponent(projectId)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: newContent, createBackup: true }),
+      });
+
+      if (response.ok) {
+        setCurrentContent(newContent);
+        const parsed = parseContent(newContent, viewMode);
+        setItems(parsed);
+      }
+    } catch (error) {
+      console.error('Failed to save file:', error);
+    }
   };
 
   const handleAIResult = (result: DiffResult, modifiedContent: string, mode: AIMode) => {
@@ -147,12 +270,18 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
     handleSaveChanges(newFileContent);
   };
 
+  const handleRestoreBackup = (backupContent: string): void => {
+    setCurrentContent(backupContent);
+    const parsed = parseContent(backupContent, viewMode);
+    setItems(parsed);
+    setShowBackupTimeline(false);
+  };
+
   const renderItem = (item: TextItem, level = 0): React.ReactNode => {
     const isSelected = selectedItem?.id === item.id;
     const isExpanded = expandedSections.has(item.id);
     const hasChildren = item.children && item.children.length > 0;
 
-    // Hide paragraph spacers in sentence/paragraph mode
     if ((viewMode === 'sentence' || viewMode === 'paragraph') && item.content === '') {
       return null;
     }
@@ -166,6 +295,7 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
               : 'bg-slate-50 border border-slate-200 hover:border-slate-300'
               }`}
             onClick={() => handleItemClick(item)}
+            onDoubleClick={() => handleSyncToPDF(item)}
           >
             <button
               onClick={(e) => {
@@ -200,6 +330,7 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
       <div key={item.id} id={`item-${item.id}`} className="mb-2">
         <div
           onClick={() => handleItemClick(item)}
+          onDoubleClick={() => handleSyncToPDF(item)}
           className={`p-4 rounded-lg cursor-pointer transition-colors border-2 ${isSelected
             ? 'bg-blue-50 border-blue-500 shadow-md'
             : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'
@@ -236,7 +367,6 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
           </div>
         </div>
 
-        {/* Inline AI Panel */}
         {isSelected && (
           <AIEditorPanel
             isOpen={true}
@@ -248,119 +378,86 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
             onResult={handleAIResult}
             onContentChange={(newContent) => handleContentUpdate(item.id, newContent)}
             onFullscreenChange={setIsAIPanelFullscreen}
+            editorRef={editorContainerRef}
           />
         )}
       </div>
     );
   };
 
-  const flattenItems = (items: TextItem[]): TextItem[] => {
-    const result: TextItem[] = [];
-    for (const item of items) {
-      result.push(item);
-      if (item.children) {
-        result.push(...flattenItems(item.children));
-      }
-    }
-    return result;
-  };
-
-  const handleRestoreBackup = (backupContent: string): void => {
-    setCurrentContent(backupContent);
-    const parsed = parseContent(backupContent, viewMode);
-    setItems(parsed);
-    setShowBackupTimeline(false);
-  };
-
-  const handleSaveChanges = async (newContent: string): Promise<void> => {
-    if (!selectedFile || !selectedProject) return;
-
-    try {
-      const projectId = selectedProject.project.id;
-      const response = await fetch(`/api/files/${encodeURIComponent(selectedFile.path)}?projectId=${encodeURIComponent(projectId)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: newContent, createBackup: true }),
-      });
-
-      if (response.ok) {
-        setCurrentContent(newContent);
-        const parsed = parseContent(newContent, viewMode);
-        setItems(parsed);
-      }
-    } catch (error) {
-      console.error('Failed to save file:', error);
-    }
-  };
-
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden bg-slate-50">
       {/* Top Bar */}
-      {selectedFile && (
-        <div className="px-6 py-4 border-b border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between">
+      <div className="px-4 py-2 border-b border-slate-200 bg-white shadow-sm h-10 flex items-center shrink-0">
+        <div className="flex items-center justify-between w-full">
+          {selectedFile ? (
             <div className="flex items-center gap-3">
-              <FileText size={20} className="text-orange-500" />
-              <h2 className="text-lg font-semibold text-slate-800">{selectedFile.name}</h2>
+              <FileText size={16} className="text-orange-500" />
+              <h2 className="text-sm font-semibold text-slate-800">{selectedFile.name}</h2>
               {/* Save Status Indicator */}
               {saveStatus === 'saving' && (
-                <span className="flex items-center gap-1 text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded-full">
-                  <Loader2 size={12} className="animate-spin" />
+                <span className="flex items-center gap-1 text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">
+                  <Loader2 size={10} className="animate-spin" />
                   Saving...
                 </span>
               )}
               {saveStatus === 'saved' && (
-                <span className="flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-1 rounded-full">
-                  <Check size={12} />
+                <span className="flex items-center gap-1 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">
+                  <Check size={10} />
                   Saved
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-2">
+          ) : (
+            <div className="text-sm text-slate-500 italic">No file selected</div>
+          )}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowBackupTimeline(true)}
+              className="flex items-center gap-1.5 px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-medium rounded transition-colors"
+              title="View backup history"
+            >
+              <Clock size={14} />
+              Backups
+            </button>
+            <div className="flex items-center gap-1 bg-slate-100 rounded-lg p-0.5">
               <button
-                onClick={() => setShowBackupTimeline(true)}
-                className="flex items-center gap-2 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-medium rounded-lg transition-colors"
-                title="View backup history"
+                onClick={() => setViewMode('section')}
+                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${viewMode === 'section'
+                  ? 'bg-white text-blue-600 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-800'
+                  }`}
               >
-                <Clock size={16} />
-                Backups
+                Section
               </button>
-              <div className="flex items-center gap-2 bg-slate-100 rounded-lg p-1">
-                <button
-                  onClick={() => setViewMode('section')}
-                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${viewMode === 'section'
-                    ? 'bg-white text-blue-600 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-800'
-                    }`}
-                >
-                  Section
-                </button>
-                <button
-                  onClick={() => setViewMode('paragraph')}
-                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${viewMode === 'paragraph'
-                    ? 'bg-white text-green-600 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-800'
-                    }`}
-                >
-                  Paragraph
-                </button>
-                <button
-                  onClick={() => setViewMode('sentence')}
-                  className={`px-4 py-2 text-sm font-medium rounded transition-colors ${viewMode === 'sentence'
-                    ? 'bg-white text-purple-600 shadow-sm'
-                    : 'text-slate-600 hover:text-slate-800'
-                    }`}
-                >
-                  Sentence
-                </button>
-              </div>
+              <button
+                onClick={() => setViewMode('paragraph')}
+                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${viewMode === 'paragraph'
+                  ? 'bg-white text-green-600 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-800'
+                  }`}
+              >
+                Paragraph
+              </button>
+              <button
+                onClick={() => setViewMode('sentence')}
+                className={`px-3 py-1 text-xs font-medium rounded transition-colors ${viewMode === 'sentence'
+                  ? 'bg-white text-purple-600 shadow-sm'
+                  : 'text-slate-600 hover:text-slate-800'
+                  }`}
+              >
+                Sentence
+              </button>
             </div>
           </div>
         </div>
-      )}
+      </div>
 
       {/* Content Area - dynamic height when AI panel is open */}
-      <div className="flex-1 overflow-y-auto p-6">
+      <div
+        ref={editorContainerRef}
+        className="flex-1 overflow-y-auto p-6 relative"
+      >
         {selectedFile ? (
           items.length > 0 ? (
             <div className="max-w-4xl mx-auto pb-4">
@@ -398,12 +495,13 @@ const MainEditor: React.FC<MainEditorProps> = ({ selectedFile, selectedProject }
           projectId={selectedProject?.project.id || ''}
           filePath={selectedFile.path}
           fileName={selectedFile.name}
+          currentContent={currentContent}
           onClose={() => setShowBackupTimeline(false)}
           onRestore={handleRestoreBackup}
         />
       )}
     </div>
   );
-};
+}); // Close component body
 
 export default MainEditor;
