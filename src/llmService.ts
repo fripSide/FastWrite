@@ -4,6 +4,7 @@ import { join } from 'node:path';
 
 const PROJS_DIR = join(process.cwd(), 'projs');
 const LLM_CONFIG_FILE = join(PROJS_DIR, 'llm-config.json');
+const LLM_PROVIDERS_FILE = join(PROJS_DIR, 'llm-providers.json');
 
 export interface LLMConfig {
   baseUrl: string;
@@ -11,8 +12,32 @@ export interface LLMConfig {
   model: string;
 }
 
+// New: LLM Provider for multi-API management
+export interface LLMProvider {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  models: string[];
+  selectedModel: string;
+  isActive: boolean;
+  createdAt: number;
+}
+
 // Load config from file, fallback to environment variables
 export function getLLMConfig(): LLMConfig {
+  // First try to get from active provider
+  const providers = getLLMProviders();
+  const activeProvider = providers.find(p => p.isActive);
+  if (activeProvider) {
+    return {
+      baseUrl: activeProvider.baseUrl,
+      apiKey: activeProvider.apiKey,
+      model: activeProvider.selectedModel
+    };
+  }
+
+  // Fallback to legacy config file
   try {
     if (existsSync(LLM_CONFIG_FILE)) {
       const data = JSON.parse(readFileSync(LLM_CONFIG_FILE, 'utf-8'));
@@ -33,7 +58,7 @@ export function getLLMConfig(): LLMConfig {
   };
 }
 
-// Save config to file
+// Save config to file (legacy, for backward compatibility)
 export function saveLLMConfig(config: Partial<LLMConfig>): boolean {
   try {
     if (!existsSync(PROJS_DIR)) {
@@ -52,6 +77,101 @@ export function saveLLMConfig(config: Partial<LLMConfig>): boolean {
   } catch (error) {
     console.error('Failed to save LLM config:', error);
     return false;
+  }
+}
+
+// ============ LLM Provider Management ============
+
+// Load all providers
+export function getLLMProviders(): LLMProvider[] {
+  try {
+    if (existsSync(LLM_PROVIDERS_FILE)) {
+      const data = JSON.parse(readFileSync(LLM_PROVIDERS_FILE, 'utf-8'));
+      return Array.isArray(data) ? data : [];
+    }
+  } catch (error) {
+    console.error('Failed to load LLM providers:', error);
+  }
+  return [];
+}
+
+// Save all providers
+function saveLLMProviders(providers: LLMProvider[]): boolean {
+  try {
+    if (!existsSync(PROJS_DIR)) {
+      mkdirSync(PROJS_DIR, { recursive: true });
+    }
+    writeFileSync(LLM_PROVIDERS_FILE, JSON.stringify(providers, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to save LLM providers:', error);
+    return false;
+  }
+}
+
+// Add or update a provider
+export function saveLLMProvider(provider: LLMProvider): boolean {
+  const providers = getLLMProviders();
+  const existingIndex = providers.findIndex(p => p.id === provider.id);
+
+  if (existingIndex >= 0) {
+    providers[existingIndex] = provider;
+  } else {
+    providers.push(provider);
+  }
+
+  return saveLLMProviders(providers);
+}
+
+// Delete a provider
+export function deleteLLMProvider(id: string): boolean {
+  const providers = getLLMProviders();
+  const filtered = providers.filter(p => p.id !== id);
+
+  // If deleted provider was active, activate another one
+  if (filtered.length > 0 && !filtered.some(p => p.isActive) && filtered[0]) {
+    filtered[0].isActive = true;
+  }
+
+  return saveLLMProviders(filtered);
+}
+
+// Set active provider
+export function setActiveProvider(id: string): boolean {
+  const providers = getLLMProviders();
+  let found = false;
+
+  for (const provider of providers) {
+    if (provider.id === id) {
+      provider.isActive = true;
+      found = true;
+    } else {
+      provider.isActive = false;
+    }
+  }
+
+  if (!found) return false;
+  return saveLLMProviders(providers);
+}
+
+// Fetch models from OpenAI-compatible API
+export async function fetchModelsFromAPI(baseUrl: string, apiKey: string): Promise<string[]> {
+  try {
+    const normalizedUrl = baseUrl.replace(/\/+$/, '').replace(/\/chat\/completions\/?$/, '');
+    const client = new OpenAI({ apiKey, baseURL: normalizedUrl });
+
+    const response = await client.models.list();
+    const models: string[] = [];
+
+    for await (const model of response) {
+      models.push(model.id);
+    }
+
+    // Sort models alphabetically
+    return models.sort((a, b) => a.localeCompare(b));
+  } catch (error) {
+    console.error('Failed to fetch models:', error);
+    throw error;
   }
 }
 
@@ -129,6 +249,79 @@ Return only the corrected text with minimal changes.`,
     user: 'Please fix any grammar, spelling, punctuation, or syntax errors in the following text. Do not change the meaning or structure. Return only the corrected text.'
   }
 };
+
+// Export for use by API endpoints
+export { DEFAULT_PROMPTS };
+
+// Project-specific prompts type - shared system + mode user prompts
+export interface ProjectPrompts {
+  system: string; // Shared system prompt for all modes
+  diagnose: { user: string };
+  refine: { user: string };
+  quickfix: { user: string };
+}
+
+// Default shared system prompt
+const DEFAULT_SHARED_SYSTEM = `You are an expert academic writing assistant for top-tier computer science conferences (IEEE S&P, USENIX Security, OSDI, CCS).
+You help researchers refine their papers to meet high publication standards.
+Be specific, constructive, and professional in your feedback and edits.`;
+
+// Get project prompts (returns project-specific or defaults)
+export function getProjectPrompts(projectId: string): ProjectPrompts {
+  const promptsFile = join(PROJS_DIR, projectId, 'prompts.json');
+
+  try {
+    if (existsSync(promptsFile)) {
+      const data = JSON.parse(readFileSync(promptsFile, 'utf-8'));
+      // Support both old and new format
+      return {
+        system: data.system || DEFAULT_SHARED_SYSTEM,
+        diagnose: { user: data.diagnose?.user || DEFAULT_PROMPTS.diagnose.user },
+        refine: { user: data.refine?.user || DEFAULT_PROMPTS.refine.user },
+        quickfix: { user: data.quickfix?.user || DEFAULT_PROMPTS.quickfix.user }
+      };
+    }
+  } catch (error) {
+    console.error('Failed to load project prompts:', error);
+  }
+
+  return {
+    system: DEFAULT_SHARED_SYSTEM,
+    diagnose: { user: DEFAULT_PROMPTS.diagnose.user },
+    refine: { user: DEFAULT_PROMPTS.refine.user },
+    quickfix: { user: DEFAULT_PROMPTS.quickfix.user }
+  };
+}
+
+// Save project prompts
+export function saveProjectPrompts(projectId: string, prompts: Partial<ProjectPrompts>): boolean {
+  const projectDir = join(PROJS_DIR, projectId);
+  const promptsFile = join(projectDir, 'prompts.json');
+
+  try {
+    if (!existsSync(projectDir)) {
+      mkdirSync(projectDir, { recursive: true });
+    }
+
+    // Merge with existing prompts
+    const current = getProjectPrompts(projectId);
+    const merged = {
+      system: prompts.system ?? current.system,
+      diagnose: { user: prompts.diagnose?.user ?? current.diagnose.user },
+      refine: { user: prompts.refine?.user ?? current.refine.user },
+      quickfix: { user: prompts.quickfix?.user ?? current.quickfix.user }
+    };
+
+    writeFileSync(promptsFile, JSON.stringify(merged, null, 2), 'utf-8');
+    return true;
+  } catch (error) {
+    console.error('Failed to save project prompts:', error);
+    return false;
+  }
+}
+
+// Export default shared system prompt for reset
+export { DEFAULT_SHARED_SYSTEM };
 
 export async function processWithAI(request: AIRequest): Promise<string> {
   const config = getLLMConfig();

@@ -8,6 +8,7 @@ import { api } from '../api';
 
 export interface MainEditorRef {
   getCurrentLine: () => number;
+  getSelectedLineCount: () => number;
 }
 
 interface MainEditorProps {
@@ -100,7 +101,7 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
     return result;
   };
 
-  // Expose current line for external sync triggering
+  // Expose current line and line count for external sync triggering
   useImperativeHandle(ref, () => ({
     getCurrentLine: () => {
       // 1. If an item is selected, use its line
@@ -118,6 +119,13 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
       }
 
       return 1;
+    },
+    getSelectedLineCount: () => {
+      // Count lines in selected item content
+      if (selectedItem?.content) {
+        return selectedItem.content.split('\n').length;
+      }
+      return 1; // Default to 1 line
     }
   }));
 
@@ -142,15 +150,11 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
         // Select the item (focus it)
         setSelectedItem(targetItem);
 
-        // Scroll into view with highlight
+        // Scroll into view (no extra ring highlight needed - selection already highlights)
         setTimeout(() => {
           const el = document.getElementById(`item-${targetItem.id}`);
           if (el) {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            el.classList.add('ring-2', 'ring-blue-500', 'ring-offset-2');
-            setTimeout(() => {
-              el.classList.remove('ring-2', 'ring-blue-500', 'ring-offset-2');
-            }, 2000);
           }
         }, 100);
       }
@@ -295,7 +299,6 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
               : 'bg-slate-50 border border-slate-200 hover:border-slate-300'
               }`}
             onClick={() => handleItemClick(item)}
-            onDoubleClick={() => handleSyncToPDF(item)}
           >
             <button
               onClick={(e) => {
@@ -330,7 +333,6 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
       <div key={item.id} id={`item-${item.id}`} className="mb-2">
         <div
           onClick={() => handleItemClick(item)}
-          onDoubleClick={() => handleSyncToPDF(item)}
           className={`p-4 rounded-lg cursor-pointer transition-colors border-2 ${isSelected
             ? 'bg-blue-50 border-blue-500 shadow-md'
             : 'bg-white border-slate-200 hover:border-slate-300 hover:shadow-sm'

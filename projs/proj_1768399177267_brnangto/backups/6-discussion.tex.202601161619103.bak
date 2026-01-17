@@ -8,7 +8,7 @@ Expanding the context window to address this issue is a priority, but it increas
 
 \textbf{PDF Compilation:} FastWrite focuses on the writing experience.
 For final PDF compilation, users rely on external tools like `latexmk` or Overleaf.
-We integrate a local PDF previewer using the native TeX engines installed by user.
+We integrate a local PDF previewer using WebAssembly-based TeX engines.
 
 \subsection{Future Work}
 \begin{itemize}

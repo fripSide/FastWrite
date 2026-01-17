@@ -2,7 +2,7 @@
 While FastWrite shows promise, there are several open challenges and limitations worth noting.
 \subsection{Limitations}
 
-\textbf{Context Awareness:} The current AI model processes text in relatively small segments, such as paragraphs or sections. This approach can lead to inconsistencies across different parts of the document. For example, a variable defined in Section 3 might be used differently in Section 2, and the AI may not detect this discrepancy. Expanding the context window to include larger portions of the text is a priority, but it comes with trade-offs, including increased latency and higher computational costs.
+\textbf{Context Awareness:} The current AI model processes text in relatively small segments, such as paragraphs or sections. This approach can lead to the oversight of cross-sectional inconsistencies. For example, a variable defined in Section 3 might be used differently in Section 2, and the AI may not detect this discrepancy. Expanding the context window to address this issue is a priority, but it comes with trade-offs, including increased latency and higher computational costs.
 \textbf{PDF Compilation:} FastWrite focuses on the \textit{writing} experience. For final PDF compilation, users still rely on external tools like `latexmk` or Overleaf. We plan to integrate a local PDF previewer using WebAssembly-based Tex engines.
 \subsection{Future Work}
 \begin{itemize}

@@ -8,9 +8,11 @@ import {
   deleteProject,
   setActiveProject,
   getProjectConfig,
+  updateProjectConfig,
   getActiveProject
 } from "./projectConfig";
-import { processWithAI, getLLMConfig, saveLLMConfig } from "./llmService";
+import { processWithAI, getLLMConfig, saveLLMConfig, getLLMProviders, saveLLMProvider, deleteLLMProvider, setActiveProvider, fetchModelsFromAPI, getProjectPrompts, saveProjectPrompts, DEFAULT_PROMPTS, type LLMProvider, type ProjectPrompts } from "./llmService";
+import { isEmbeddedAsset, getEmbeddedAsset } from "./embeddedAssets";
 
 const PORT = parseInt(process.env.PORT || "3002", 10);
 const STATIC_DIR = join(import.meta.dir, "../web/dist");
@@ -29,8 +31,12 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 // Shared directory scanning utility
-// Natural sort: 0-abstract before 1-introduction, 10-conclusion after 9-evaluation
+// Sort: folders first, then files; within each group, natural sort (0-abstract before 1-introduction)
 function naturalSort(a: FileNode, b: FileNode): number {
+  // Folders come before files
+  if (a.type === 'folder' && b.type !== 'folder') return -1;
+  if (a.type !== 'folder' && b.type === 'folder') return 1;
+  // Within same type, use natural sort
   return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
 }
 
@@ -80,6 +86,31 @@ function json(data: unknown, status = 200) {
 }
 
 function serveStatic(pathname: string): Response | null {
+  // Try to serve from embedded assets first (for single binary mode)
+  const embeddedPath = pathname === "/" ? "/index.html" : pathname;
+  if (isEmbeddedAsset(embeddedPath)) {
+    const assetPath = getEmbeddedAsset(embeddedPath);
+    if (assetPath) {
+      const ext = extname(embeddedPath);
+      const contentType = MIME_TYPES[ext] || "application/octet-stream";
+      const content = Bun.file(assetPath);
+      return new Response(content, {
+        headers: { "Content-Type": contentType },
+      });
+    }
+  }
+
+  // SPA fallback - serve index.html for unknown paths
+  if (!embeddedPath.startsWith("/assets/") && !embeddedPath.includes(".") && isEmbeddedAsset("/index.html")) {
+    const indexPath = getEmbeddedAsset("/index.html");
+    if (indexPath) {
+      return new Response(Bun.file(indexPath), {
+        headers: { "Content-Type": "text/html" },
+      });
+    }
+  }
+
+  // Fallback to filesystem for development mode
   let filePath = join(STATIC_DIR, pathname);
 
   // Default to index.html for root or missing files (SPA)
@@ -133,6 +164,18 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     if (!projectId) return json({ error: "Project ID required" }, 400);
     const config = await getProjectConfig(projectId);
     return config ? json(config) : json({ error: "Project config not found" }, 404);
+  },
+
+  "POST:/api/projects/:id/config": async (req, params) => {
+    const projectId = params[0];
+    if (!projectId) return json({ error: "Project ID required" }, 400);
+    try {
+      const updates = await req.json() as Partial<import("../web/src/types").ProjectConfig>;
+      const config = await updateProjectConfig(projectId, updates);
+      return config ? json(config) : json({ error: "Project config not found" }, 404);
+    } catch (error) {
+      return json({ error: String(error) }, 500);
+    }
   },
 
   "GET:/api/projects/:id/files": async (_req, params) => {
@@ -190,20 +233,78 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
 
   "GET:/api/backups/:projectId": async (_req, params) => {
     const config = await getProjectConfig(params[0]!);
-    if (!config) return json([]);
+    if (!config) {
+      console.log('GET /api/backups: Project config not found for', params[0]);
+      return json([]);
+    }
 
     const backupsDir = config.backupsDir;
-    if (!existsSync(backupsDir)) return json([]);
+    console.log('GET /api/backups: Checking dir', backupsDir);
 
-    return json(readdirSync(backupsDir)
+    if (!existsSync(backupsDir)) {
+      console.log('GET /api/backups: Dir does not exist');
+      return json([]);
+    }
+
+    const files = readdirSync(backupsDir);
+    console.log(`GET /api/backups: Found ${files.length} files. Filtering for .bak...`);
+
+    const results = files
       .filter(f => f.endsWith(".bak"))
       .sort().reverse()
-      .map(f => ({
-        id: f,
-        filename: f.replace(/\.\d{8}_\d{6}\.bak$/, ".tex"),
-        timestamp: f.match(/\.(\d{8}_\d{6})\.bak$/)?.[1] || "",
-        content: readFileSync(join(backupsDir, f), "utf-8")
-      })));
+      .map(f => {
+        // Format: filename.ext.YYYYMMDDHHMMSS.bak (might have extra dots if timestamp included one)
+        // Regex allows dots in timestamp part, and multiple dots before bak
+        const match = f.match(/^(.*)\.(\d+[\d.]*)\.+bak$/);
+        return {
+          id: f,
+          filename: match ? match[1] : f,
+          timestamp: (match && match[2]) ? match[2].replace(/\./g, '') : "",
+          content: readFileSync(join(backupsDir, f), "utf-8")
+        };
+      });
+
+    console.log(`GET /api/backups: Returning ${results.length} backups.`);
+    return json(results);
+  },
+
+  "DELETE:/api/backups/:projectId": async (req, params) => {
+    try {
+      const projectId = params[0]!;
+      const config = await getProjectConfig(projectId);
+      if (!config) return json({ error: "Project not found" }, 404);
+
+      const backupsDir = config.backupsDir;
+      if (!existsSync(backupsDir)) return json({ success: true });
+
+      const url = new URL(req.url);
+      const filename = url.searchParams.get("filename");
+      const { unlinkSync } = await import("node:fs");
+
+      const files = readdirSync(backupsDir).filter(f => f.endsWith(".bak"));
+      let deletedCount = 0;
+
+      for (const f of files) {
+        // If filename is specified, only delete matching backups
+        if (filename) {
+          // Check if backup file starts with the target filename
+          // Backup format: target_filename.timestamp.bak
+          // We need to be careful not to match substrings incorrectly
+          if (!f.startsWith(filename + ".")) continue;
+        }
+
+        try {
+          unlinkSync(join(backupsDir, f));
+          deletedCount++;
+        } catch (e) {
+          console.error(`Failed to delete backup ${f}`, e);
+        }
+      }
+
+      return json({ success: true, count: deletedCount });
+    } catch (error) {
+      return json({ error: String(error) }, 500);
+    }
   },
 
   "POST:/api/ai/process": async (req) => {
@@ -276,6 +377,58 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     }
   },
 
+  // ============ LLM Providers (Multi-API Management) ============
+
+  "GET:/api/llm-providers": async () => {
+    const providers = getLLMProviders();
+    // Mask API keys for security
+    const masked = providers.map(p => ({
+      ...p,
+      apiKey: p.apiKey ? `${p.apiKey.substring(0, 8)}...${p.apiKey.substring(p.apiKey.length - 4)}` : ''
+    }));
+    return json(masked);
+  },
+
+  "POST:/api/llm-providers": async (req) => {
+    try {
+      const provider = await req.json() as LLMProvider;
+      if (!provider.id || !provider.name || !provider.baseUrl) {
+        return json({ error: "id, name, and baseUrl are required" }, 400);
+      }
+      const success = saveLLMProvider(provider);
+      return success ? json({ success: true }) : json({ error: "Failed to save provider" }, 500);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "DELETE:/api/llm-providers/:id": async (_req, params) => {
+    const id = params[0];
+    if (!id) return json({ error: "Provider ID required" }, 400);
+    const success = deleteLLMProvider(id);
+    return success ? json({ success: true }) : json({ error: "Failed to delete provider" }, 500);
+  },
+
+  "POST:/api/llm-providers/:id/activate": async (_req, params) => {
+    const id = params[0];
+    if (!id) return json({ error: "Provider ID required" }, 400);
+    const success = setActiveProvider(id);
+    return success ? json({ success: true }) : json({ error: "Provider not found" }, 404);
+  },
+
+  "POST:/api/llm-providers/fetch-models": async (req) => {
+    try {
+      const { baseUrl, apiKey } = await req.json() as { baseUrl: string; apiKey: string };
+      if (!baseUrl || !apiKey) {
+        return json({ error: "baseUrl and apiKey are required" }, 400);
+      }
+      const models = await fetchModelsFromAPI(baseUrl, apiKey);
+      return json({ models });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
   "GET:/api/system-prompt/:projectId": async (_req, params) => {
     const projDir = join(process.cwd(), "projs", params[0]!);
     const path = join(projDir, "system.md");
@@ -289,6 +442,50 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     if (!existsSync(projDir)) mkdirSync(projDir, { recursive: true });
     writeFileSync(join(projDir, "system.md"), content, "utf-8");
     return json({ success: true });
+  },
+
+  // ============ Project Prompts (AI Mode Prompts) ============
+
+  "GET:/api/prompts/:projectId": async (_req, params) => {
+    const projectId = params[0];
+    if (!projectId) return json({ error: "Project ID required" }, 400);
+
+    const prompts = getProjectPrompts(projectId);
+    return json(prompts);
+  },
+
+  "POST:/api/prompts/:projectId": async (req, params) => {
+    const projectId = params[0];
+    if (!projectId) return json({ error: "Project ID required" }, 400);
+
+    try {
+      const prompts = await req.json() as Partial<ProjectPrompts>;
+      const success = saveProjectPrompts(projectId, prompts);
+      return success ? json({ success: true }) : json({ error: "Failed to save prompts" }, 500);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "POST:/api/prompts/:projectId/reset": async (_req, params) => {
+    const projectId = params[0];
+    if (!projectId) return json({ error: "Project ID required" }, 400);
+
+    // Delete prompts.json to reset to defaults
+    const promptsFile = join(process.cwd(), "projs", projectId, "prompts.json");
+    try {
+      if (existsSync(promptsFile)) {
+        const { unlinkSync } = await import("node:fs");
+        unlinkSync(promptsFile);
+      }
+      return json({ success: true, prompts: DEFAULT_PROMPTS });
+    } catch (error) {
+      return json({ error: "Failed to reset prompts" }, 500);
+    }
+  },
+
+  "GET:/api/prompts/defaults": async () => {
+    return json(DEFAULT_PROMPTS);
   },
 
   "POST:/api/projects/import-github": async (req) => {
@@ -372,6 +569,334 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 500);
     }
+  },
+
+  // LaTeX compilation and PDF preview APIs
+  "GET:/api/latex/status": async () => {
+    try {
+      // Check for pdflatex or xelatex
+      let installed = false;
+      let version = '';
+      let engine = '';
+
+      // macOS standard TeX Live path
+      const texBinPath = '/Library/TeX/texbin';
+
+      if (existsSync(`${texBinPath}/pdflatex`)) {
+        try {
+          const result = execSync(`"${texBinPath}/pdflatex" --version 2>&1`, {
+            encoding: 'utf-8',
+            timeout: 5000
+          });
+          installed = true;
+          engine = 'pdflatex';
+          const versionMatch = result.match(/pdfTeX[^\n]*/i);
+          version = versionMatch ? versionMatch[0].trim() : 'pdflatex';
+        } catch {
+          installed = true;
+          engine = 'pdflatex';
+          version = 'pdflatex';
+        }
+      } else if (existsSync(`${texBinPath}/xelatex`)) {
+        try {
+          const result = execSync(`"${texBinPath}/xelatex" --version 2>&1`, {
+            encoding: 'utf-8',
+            timeout: 5000
+          });
+          installed = true;
+          engine = 'xelatex';
+          const versionMatch = result.match(/XeTeX[^\n]*/i);
+          version = versionMatch ? versionMatch[0].trim() : 'xelatex';
+        } catch {
+          installed = true;
+          engine = 'xelatex';
+          version = 'xelatex';
+        }
+      }
+
+      return json({ installed, version, engine });
+    } catch (error) {
+      return json({ installed: false, error: String(error) });
+    }
+  },
+
+  "POST:/api/latex/compile": async (req) => {
+    try {
+      const { projectId, texPath } = await req.json() as { projectId: string; texPath: string };
+
+      if (!projectId || !texPath) {
+        return json({ success: false, error: 'projectId and texPath are required' }, 400);
+      }
+
+      const config = await getProjectConfig(projectId);
+      if (!config) {
+        return json({ success: false, error: 'Project not found' }, 404);
+      }
+
+      if (!existsSync(texPath)) {
+        return json({ success: false, error: 'TeX file not found' }, 404);
+      }
+
+      // Determine which LaTeX engine to use (macOS path: /Library/TeX/texbin/)
+      // Determine which LaTeX engine to use (macOS path: /Library/TeX/texbin/)
+      let engine = '';
+      const texBinPath = '/Library/TeX/texbin';
+      const preferredCompiler = config.compiler || 'pdflatex';
+
+      if (existsSync(`${texBinPath}/${preferredCompiler}`)) {
+        engine = `${texBinPath}/${preferredCompiler}`;
+      } else if (existsSync(`${texBinPath}/pdflatex`)) {
+        engine = `${texBinPath}/pdflatex`;
+      } else if (existsSync(`${texBinPath}/xelatex`)) {
+        engine = `${texBinPath}/xelatex`;
+      } else {
+        // Try system PATH as fallback
+        try {
+          const which = execSync(`which ${preferredCompiler}`, { encoding: 'utf-8' }).trim();
+          if (which) engine = which;
+        } catch {
+          try {
+            const which = execSync('which pdflatex', { encoding: 'utf-8' }).trim();
+            if (which) engine = which;
+          } catch {
+            try {
+              const which = execSync('which xelatex', { encoding: 'utf-8' }).trim();
+              if (which) engine = which;
+            } catch {
+              return json({ success: false, error: 'No LaTeX engine found. Please install TeX Live or MiKTeX.' }, 500);
+            }
+          }
+        }
+      }
+
+      // Get directory and filename
+      const texDir = require('path').dirname(texPath);
+      const texFilename = require('path').basename(texPath);
+      const outputName = texFilename.replace(/\.tex$/, '');
+
+      // Run compilation with synctex enabled
+      const command = `cd "${texDir}" && "${engine}" -synctex=1 -interaction=nonstopmode -file-line-error "${texFilename}" 2>&1`;
+
+      try {
+        execSync(command, { encoding: 'utf-8', timeout: 60000, maxBuffer: 1024 * 1024 * 10 });
+      } catch (compileError: unknown) {
+        // LaTeX often returns non-zero even on success, check if PDF was created
+        const pdfPath = join(texDir, `${outputName}.pdf`);
+        if (!existsSync(pdfPath)) {
+          const errorMessage = compileError instanceof Error ? compileError.message : String(compileError);
+          // Extract useful error lines
+          const lines = errorMessage.split('\n');
+          const errorLines = lines.filter(l => l.includes('!') || l.includes('Error') || l.includes('error:'));
+          return json({
+            success: false,
+            error: errorLines.length > 0 ? errorLines.slice(0, 10).join('\n') : 'Compilation failed'
+          }, 200);
+        }
+      }
+
+      const pdfPath = join(texDir, `${outputName}.pdf`);
+      const synctexPath = join(texDir, `${outputName}.synctex.gz`);
+
+      if (!existsSync(pdfPath)) {
+        return json({ success: false, error: 'PDF was not generated' }, 200);
+      }
+
+      return json({
+        success: true,
+        pdfPath,
+        synctexPath: existsSync(synctexPath) ? synctexPath : null
+      });
+    } catch (error) {
+      return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "GET:/api/latex/pdf/:projectId": async (_req, params) => {
+    const projectId = params[0];
+    if (!projectId) return json({ error: 'Project ID required' }, 400);
+
+    const config = await getProjectConfig(projectId);
+    if (!config) return json({ error: 'Project not found' }, 404);
+
+    // Find PDF in sections directory (look for any .pdf file)
+    const sectionsDir = config.sectionsDir;
+
+    const findPdf = (dir: string): string | null => {
+      try {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const full = join(dir, entry.name);
+          if (entry.isFile() && entry.name.endsWith('.pdf')) {
+            return full;
+          }
+          if (entry.isDirectory()) {
+            const found = findPdf(full);
+            if (found) return found;
+          }
+        }
+      } catch { /* ignore */ }
+      return null;
+    };
+
+    const pdfPath = findPdf(sectionsDir);
+    if (!pdfPath || !existsSync(pdfPath)) {
+      return json({ error: 'PDF not found' }, 404);
+    }
+
+    const pdfContent = readFileSync(pdfPath);
+    return new Response(pdfContent, {
+      headers: {
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `inline; filename="${basename(pdfPath)}"`,
+        'Cache-Control': 'no-cache'
+      }
+    });
+  },
+
+  // Reveal PDF in Finder (macOS)
+  "POST:/api/latex/reveal/:projectId": async (_req, params) => {
+    const projectId = params[0];
+    if (!projectId) return json({ error: 'Project ID required' }, 400);
+
+    const config = await getProjectConfig(projectId);
+    if (!config) return json({ error: 'Project not found' }, 404);
+
+    // Find PDF in sections directory
+    const sectionsDir = config.sectionsDir;
+    const findPdf = (dir: string): string | null => {
+      try {
+        const entries = readdirSync(dir, { withFileTypes: true });
+        for (const entry of entries) {
+          const full = join(dir, entry.name);
+          if (entry.isFile() && entry.name.endsWith('.pdf')) {
+            return full;
+          }
+          if (entry.isDirectory()) {
+            const found = findPdf(full);
+            if (found) return found;
+          }
+        }
+      } catch { /* ignore */ }
+      return null;
+    };
+
+    const pdfPath = findPdf(sectionsDir);
+    if (!pdfPath || !existsSync(pdfPath)) {
+      return json({ error: 'PDF not found' }, 404);
+    }
+
+    try {
+      // macOS: open -R reveals file in Finder
+      execSync(`open -R "${pdfPath}"`);
+      return json({ success: true, path: pdfPath });
+    } catch (error) {
+      return json({ success: false, error: String(error) }, 500);
+    }
+  },
+
+  "POST:/api/latex/synctex": async (req) => {
+    try {
+      const { parseSynctex, pdfToSource, getSynctexPath } = await import('./synctex');
+      const { projectId, page, x, y } = await req.json() as { projectId: string; page: number; x: number; y: number };
+
+      if (!projectId) return json({ error: 'projectId required' }, 400);
+
+      const config = await getProjectConfig(projectId);
+      if (!config) return json({ error: 'Project not found' }, 404);
+
+      // Find synctex.gz file
+      const sectionsDir = config.sectionsDir;
+
+      const findSynctex = (dir: string): string | null => {
+        try {
+          const entries = readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const full = join(dir, entry.name);
+            if (entry.isFile() && (entry.name.endsWith('.synctex.gz') || entry.name.endsWith('.synctex'))) {
+              return full;
+            }
+            if (entry.isDirectory()) {
+              const found = findSynctex(full);
+              if (found) return found;
+            }
+          }
+        } catch { /* ignore */ }
+        return null;
+      };
+
+      const synctexPath = findSynctex(sectionsDir);
+      if (!synctexPath) {
+        return json({ error: 'SyncTeX file not found. Please compile with synctex enabled.' }, 404);
+      }
+
+      const synctexData = parseSynctex(synctexPath);
+      if (!synctexData) {
+        return json({ error: 'Failed to parse SyncTeX file' }, 500);
+      }
+
+      const result = pdfToSource(synctexData, page, x, y);
+      if (!result) {
+        return json({ error: 'Could not find source location' }, 404);
+      }
+
+      return json(result);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "POST:/api/latex/forward-synctex": async (req) => {
+    try {
+      const { parseSynctex, sourceToPdf, getSynctexPath } = await import('./synctex');
+      const { projectId, file, line } = await req.json() as { projectId: string; file: string; line: number };
+
+      if (!projectId) return json({ error: 'projectId required' }, 400);
+
+      const config = await getProjectConfig(projectId);
+      if (!config) return json({ error: 'Project not found' }, 404);
+
+      const sectionsDir = config.sectionsDir;
+
+      // Helper to find synctex file recursively
+      const findSynctex = (dir: string): string | null => {
+        try {
+          const entries = readdirSync(dir, { withFileTypes: true });
+          for (const entry of entries) {
+            const full = join(dir, entry.name);
+            if (entry.isFile() && (entry.name.endsWith('.synctex.gz') || entry.name.endsWith('.synctex'))) {
+              return full;
+            }
+            if (entry.isDirectory()) {
+              const found = findSynctex(full);
+              if (found) return found;
+            }
+          }
+        } catch { /* ignore */ }
+        return null;
+      };
+
+      const synctexPath = findSynctex(sectionsDir);
+      if (!synctexPath) {
+        return json({ error: 'SyncTeX file not found' }, 404);
+      }
+
+      const synctexData = parseSynctex(synctexPath);
+      if (!synctexData) {
+        return json({ error: 'Failed to parse SyncTeX file' }, 500);
+      }
+
+      // Forward search: Source -> PDF
+      const result = sourceToPdf(synctexData, file, line);
+
+      if (!result) {
+        return json({ error: 'Could not find PDF location' }, 404);
+      }
+
+      return json(result);
+    } catch (error) {
+      console.error("Forward SyncTeX error:", error);
+      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
   }
 };
 
@@ -404,116 +929,142 @@ function matchRoute(method: string, path: string): { handler: (req: Request, par
 }
 
 // Server
-const server = Bun.serve({
-  port: PORT,
-  async fetch(req) {
-    const url = new URL(req.url);
+const appFetch = async (req: Request) => {
+  const url = new URL(req.url);
 
-    // API routes
-    if (url.pathname.startsWith("/api/")) {
-      // Special handling for /api/files/ since the path can contain slashes
-      if (url.pathname.startsWith("/api/files/")) {
-        const encodedPath = url.pathname.substring("/api/files/".length);
-        const filePath = decodeURIComponent(encodedPath);
-        const projectId = url.searchParams.get("projectId");
+  // API routes
+  if (url.pathname.startsWith("/api/")) {
+    // Special handling for /api/files/ since the path can contain slashes
+    if (url.pathname.startsWith("/api/files/")) {
+      const encodedPath = url.pathname.substring("/api/files/".length);
+      const filePath = decodeURIComponent(encodedPath);
+      const projectId = url.searchParams.get("projectId");
 
-        if (!filePath) {
-          return json({ error: "File path required" }, 400);
-        }
-
-        if (req.method === "GET") {
-          // Read file content
-          if (!existsSync(filePath)) {
-            return json({ error: "File not found" }, 404);
-          }
-
-          try {
-            const content = readFileSync(filePath, "utf-8");
-
-            // Also parse sections for the file
-            const lines = content.split('\n');
-            const sections: { id: string; level: number; title: string; lineStart: number }[] = [];
-            const sectionRegex = /\\section\*?\s*\{([^}]*)\}/;
-            const subsectionRegex = /\\subsection\*?\s*\{([^}]*)\}/;
-
-            lines.forEach((line, index) => {
-              let match: RegExpExecArray | null = null;
-              let level = 0;
-
-              if ((match = sectionRegex.exec(line)) !== null) {
-                level = 1;
-              } else if ((match = subsectionRegex.exec(line)) !== null) {
-                level = 2;
-              }
-
-              if (match && level > 0) {
-                sections.push({
-                  id: `section_${sections.length}`,
-                  level,
-                  title: (match[1] || '').trim(),
-                  lineStart: index + 1
-                });
-              }
-            });
-
-            return json({ content, sections });
-          } catch (error) {
-            return json({ error: error instanceof Error ? error.message : String(error) }, 500);
-          }
-        } else if (req.method === "POST") {
-          // Write file content with optional backup
-          try {
-            const body = await req.json() as { content: string; createBackup?: boolean };
-
-            if (!body.content && body.content !== "") {
-              return json({ error: "Content is required" }, 400);
-            }
-
-            // Create backup if requested and file exists
-            if (body.createBackup && existsSync(filePath) && projectId) {
-              const config = await getProjectConfig(projectId);
-              if (config) {
-                const backupsDir = config.backupsDir;
-                if (!existsSync(backupsDir)) {
-                  mkdirSync(backupsDir, { recursive: true });
-                }
-
-                const filename = basename(filePath);
-                const timestamp = new Date().toISOString().replace(/[-:T]/g, "").substring(0, 15);
-                const backupPath = join(backupsDir, `${filename}.${timestamp}.bak`);
-
-                const originalContent = readFileSync(filePath, "utf-8");
-                writeFileSync(backupPath, originalContent, "utf-8");
-              }
-            }
-
-            // Write new content
-            writeFileSync(filePath, body.content, "utf-8");
-
-            return json({ success: true });
-          } catch (error) {
-            return json({ error: error instanceof Error ? error.message : String(error) }, 500);
-          }
-        }
-
-        return json({ error: "Method not allowed" }, 405);
+      if (!filePath) {
+        return json({ error: "File path required" }, 400);
       }
 
-      const matched = matchRoute(req.method, url.pathname);
-      if (matched) {
-        return matched.handler(req, matched.params);
+      if (req.method === "GET") {
+        // Read file content
+        if (!existsSync(filePath)) {
+          return json({ error: "File not found" }, 404);
+        }
+
+        try {
+          const content = readFileSync(filePath, "utf-8");
+
+          // Also parse sections for the file
+          const lines = content.split('\n');
+          const sections: { id: string; level: number; title: string; lineStart: number }[] = [];
+          const sectionRegex = /\\section\*?\s*\{([^}]*)\}/;
+          const subsectionRegex = /\\subsection\*?\s*\{([^}]*)\}/;
+
+          lines.forEach((line, index) => {
+            let match: RegExpExecArray | null = null;
+            let level = 0;
+
+            if ((match = sectionRegex.exec(line)) !== null) {
+              level = 1;
+            } else if ((match = subsectionRegex.exec(line)) !== null) {
+              level = 2;
+            }
+
+            if (match && level > 0) {
+              sections.push({
+                id: `section_${sections.length}`,
+                level,
+                title: (match[1] || '').trim(),
+                lineStart: index + 1
+              });
+            }
+          });
+
+          return json({ content, sections });
+        } catch (error) {
+          return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+        }
+      } else if (req.method === "POST") {
+        // Write file content with optional backup
+        try {
+          const body = await req.json() as { content: string; createBackup?: boolean };
+
+          if (!body.content && body.content !== "") {
+            return json({ error: "Content is required" }, 400);
+          }
+
+          // Create backup if requested and file exists
+          if (body.createBackup && existsSync(filePath) && projectId) {
+            const config = await getProjectConfig(projectId);
+            if (config) {
+              const backupsDir = config.backupsDir;
+              if (!existsSync(backupsDir)) {
+                mkdirSync(backupsDir, { recursive: true });
+              }
+
+              const filename = basename(filePath);
+              // Fix: Remove dots from timestamp to avoid double dots in filename
+              const timestamp = new Date().toISOString().replace(/[-:T.]/g, "").substring(0, 15);
+              const backupPath = join(backupsDir, `${filename}.${timestamp}.bak`);
+
+              const originalContent = readFileSync(filePath, "utf-8");
+              writeFileSync(backupPath, originalContent, "utf-8");
+            }
+          }
+
+          // Write new content
+          writeFileSync(filePath, body.content, "utf-8");
+
+          return json({ success: true });
+        } catch (error) {
+          return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+        }
       }
-      return json({ error: "Not found" }, 404);
+
+      return json({ error: "Method not allowed" }, 405);
     }
 
-    // Static files
-    const staticResponse = serveStatic(url.pathname);
-    if (staticResponse) {
-      return staticResponse;
+    const matched = matchRoute(req.method, url.pathname);
+    if (matched) {
+      return matched.handler(req, matched.params);
     }
+    return json({ error: "Not found" }, 404);
+  }
 
-    return new Response("Not Found", { status: 404 });
-  },
-});
+  // Static files
+  const staticResponse = serveStatic(url.pathname);
+  if (staticResponse) {
+    return staticResponse;
+  }
 
-console.log(`FastWrite running at http://localhost:${PORT}`);
+  return new Response("Not Found", { status: 404 });
+};
+
+// Start server with automatic port selection
+async function startServer(startPort: number) {
+  let port = startPort;
+  const maxRetries = 10;
+
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      const server = Bun.serve({
+        port,
+        fetch: appFetch,
+      });
+
+      console.log(`FastWrite running at http://localhost:${server.port}`);
+      return server;
+    } catch (err: any) {
+      if (err.name === 'EADDRINUSE' || err.code === 'EADDRINUSE') {
+        console.log(`Port ${port} is occupied, trying ${port + 1}...`);
+        port++;
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  console.error(`Could not find an available port after ${maxRetries} attempts.`);
+  process.exit(1);
+}
+
+startServer(PORT);

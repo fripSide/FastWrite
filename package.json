@@ -1,10 +1,13 @@
 {
   "name": "fastwrite",
+  "version": "1.0.1",
+  "description": "Fast LaTeX Paper Writing",
   "type": "module",
   "private": true,
   "scripts": {
     "dev": "PORT=3003 bun run src/server.ts & cd web && bun run dev",
     "build": "cd web && bun run build",
+    "build:release": "cd web && bun run build && cd .. && bun build --compile --target=bun --outfile=fastwrite ./src/server.ts",
     "start": "cd web && bun run build && cd .. && bun run src/server.ts",
     "typecheck": "bunx tsc --noEmit",
     "test": "bunx vitest",

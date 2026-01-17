@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { X, FileText, Save, Loader2, CheckCircle } from 'lucide-react';
-import { api } from '../api';
+import { createPortal } from 'react-dom';
+import { X, FileText, Save, Loader2, CheckCircle, RotateCcw, Search, Wand2, Zap } from 'lucide-react';
+
+type AIMode = 'diagnose' | 'refine' | 'quickfix';
+
+interface ProjectPrompts {
+	system: string;
+	diagnose: { user: string };
+	refine: { user: string };
+	quickfix: { user: string };
+}
 
 interface SystemPromptModalProps {
 	isOpen: boolean;
@@ -8,41 +17,15 @@ interface SystemPromptModalProps {
 	onClose: () => void;
 }
 
-const DEFAULT_SYSTEM_PROMPT = `**System Role:**  
-You are a strict and professional academic editor and reviewer for top-tier computer security and systems conferences (such as IEEE S&P, USENIX Security, OSDI, CCS). Your goal is to refine the user's draft to meet the high standards of these venues, specifically mimicking the writing style of high-quality systems papers (e.g., the "bpftime" OSDI'25 paper).
-
-**Task:**  
-Rewrite and polish the provided text. The goal is to make it **concise, precise, and authoritative**.
-
-**Style Guidelines (Strictly Follow These):**
-
-1. **Conciseness & Density (High Information Density):**
-    - Eliminate all "fluff," filler words, and redundant adjectives (e.g., remove "very," "extremely," "successfully").
-    - Every sentence must convey new information or a necessary logical step.
-    - Avoid long-winded passive constructions. Use **Active Voice** whenever possible.
-
-2. **Authoritative & Direct Tone:**
-    - Use strong, specific verbs (e.g., enforce, guarantee, mitigate, isolate, decouple, orchestrate).
-    - Avoid hedging or weak language (e.g., avoid "we try to," "it seems that"). Be confident: "We demonstrate," "We present".
-    - When describing your own work, use "We + Verb".
-
-3. **Logical Flow & Signposting:**
-    - Use logical connectors: In contrast, Conversely, Consequently, Specifically, To address this challenge...
-    - Ensure the problem statement clearly articulates the **tension** or **trade-off**.
-
-4. **Terminological Precision:**
-    - Ensure technical terms are used consistently.
-    - Distinguish clearly between actors (e.g., "Attacker" vs. "User" vs. "Developer").
-    - Avoid vague pronouns. If "it" is ambiguous, repeat the noun.
-
-5. **Quantitative over Qualitative:**
-    - Prefer "reduces overhead by 5x" over "greatly reduces overhead."
-    - Prefer "negligible performance impact (<1%)" over "very fast."
-
-Here are the draft:`;
+const MODE_LABELS: Record<AIMode, { label: string; icon: React.ReactNode; color: string }> = {
+	diagnose: { label: 'Diagnose', icon: <Search size={14} />, color: 'blue' },
+	refine: { label: 'Refine', icon: <Wand2 size={14} />, color: 'purple' },
+	quickfix: { label: 'QuickFix', icon: <Zap size={14} />, color: 'green' }
+};
 
 const SystemPromptModal: React.FC<SystemPromptModalProps> = ({ isOpen, projectId, onClose }) => {
-	const [content, setContent] = useState('');
+	const [prompts, setPrompts] = useState<ProjectPrompts | null>(null);
+	const [activeMode, setActiveMode] = useState<AIMode>('diagnose');
 	const [isLoading, setIsLoading] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
 	const [saved, setSaved] = useState(false);
@@ -60,45 +43,85 @@ const SystemPromptModal: React.FC<SystemPromptModalProps> = ({ isOpen, projectId
 
 	useEffect(() => {
 		if (isOpen && projectId) {
-			loadPrompt();
+			loadPrompts();
 		}
 	}, [isOpen, projectId]);
 
-	const loadPrompt = async () => {
+	const loadPrompts = async () => {
 		setIsLoading(true);
 		try {
-			const promptContent = await api.getSystemPrompt(projectId);
-			// Use default if no saved prompt
-			setContent(promptContent || DEFAULT_SYSTEM_PROMPT);
+			const response = await fetch(`/api/prompts/${projectId}`);
+			if (response.ok) {
+				const data = await response.json();
+				setPrompts(data);
+			}
 		} catch (error) {
-			console.error('Failed to load system prompt:', error);
-			setContent(DEFAULT_SYSTEM_PROMPT);
+			console.error('Failed to load prompts:', error);
 		} finally {
 			setIsLoading(false);
 		}
 	};
 
 	const handleSave = async () => {
+		if (!prompts) return;
+
 		setIsSaving(true);
 		try {
-			await api.saveSystemPrompt(projectId, content);
-			setSaved(true);
-			setTimeout(() => {
-				setSaved(false);
-				onClose();
-			}, 800);
+			const response = await fetch(`/api/prompts/${projectId}`, {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(prompts)
+			});
+
+			if (response.ok) {
+				setSaved(true);
+				setTimeout(() => {
+					setSaved(false);
+					onClose();
+				}, 800);
+			}
 		} catch (error) {
-			console.error('Failed to save system prompt:', error);
+			console.error('Failed to save prompts:', error);
 		} finally {
 			setIsSaving(false);
 		}
 	};
 
+	const handleReset = async () => {
+		if (!confirm('Reset all prompts to defaults? This cannot be undone.')) return;
+
+		setIsLoading(true);
+		try {
+			const response = await fetch(`/api/prompts/${projectId}/reset`, { method: 'POST' });
+			if (response.ok) {
+				const data = await response.json();
+				setPrompts(data.prompts);
+			}
+		} catch (error) {
+			console.error('Failed to reset prompts:', error);
+		} finally {
+			setIsLoading(false);
+		}
+	};
+
+	const updateSystemPrompt = (value: string) => {
+		if (!prompts) return;
+		setPrompts({ ...prompts, system: value });
+	};
+
+	const updateModePrompt = (mode: AIMode, value: string) => {
+		if (!prompts) return;
+		setPrompts({
+			...prompts,
+			[mode]: { user: value }
+		});
+	};
+
 	if (!isOpen) return null;
 
-	return (
-		<div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-			<div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+	return createPortal(
+		<div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[100]">
+			<div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[85vh] overflow-hidden flex flex-col">
 				{/* Header */}
 				<div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-amber-50 to-orange-50">
 					<div className="flex items-center justify-between">
@@ -107,8 +130,8 @@ const SystemPromptModal: React.FC<SystemPromptModalProps> = ({ isOpen, projectId
 								<FileText size={20} className="text-amber-600" />
 							</div>
 							<div>
-								<h2 className="text-lg font-bold text-slate-800">System Prompt</h2>
-								<p className="text-xs text-slate-500">Configure AI behavior for this project</p>
+								<h2 className="text-lg font-bold text-slate-800">AI Prompts</h2>
+								<p className="text-xs text-slate-500">Configure AI behavior for each mode</p>
 							</div>
 						</div>
 						<button
@@ -121,62 +144,127 @@ const SystemPromptModal: React.FC<SystemPromptModalProps> = ({ isOpen, projectId
 					</div>
 				</div>
 
+				{/* Runtime explanation */}
+				<div className="px-6 py-3 bg-blue-50 border-b border-blue-100">
+					<p className="text-xs text-blue-700">
+						<span className="font-semibold">Run with prompts:</span>
+						<span className="mx-1 px-1.5 py-0.5 bg-blue-100 rounded">System Prompt</span>
+						<span className="text-blue-400">+</span>
+						<span className="mx-1 px-1.5 py-0.5 bg-purple-100 rounded">{MODE_LABELS[activeMode].label} User Prompt</span>
+						<span className="text-blue-400">+</span>
+						<span className="mx-1 px-1.5 py-0.5 bg-green-100 rounded">Selected Text</span>
+					</p>
+				</div>
+
 				{/* Content */}
 				<div className="flex-1 p-6 overflow-auto">
 					{isLoading ? (
 						<div className="flex items-center justify-center py-12">
 							<Loader2 size={24} className="animate-spin text-blue-500" />
 						</div>
+					) : prompts ? (
+						<div className="space-y-5">
+							{/* Shared System Prompt */}
+							<div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
+								<label className="block text-sm font-semibold text-blue-800 mb-2">
+									System Prompt
+									<span className="text-xs text-blue-500 ml-2 font-normal">(Shared across all modes)</span>
+								</label>
+								<textarea
+									value={prompts.system}
+									onChange={(e) => updateSystemPrompt(e.target.value)}
+									placeholder="Enter system prompt..."
+									className="w-full h-[120px] p-3 text-sm font-mono border border-blue-200 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+									disabled={isSaving}
+								/>
+							</div>
+
+							{/* Mode Tabs */}
+							<div>
+								<div className="flex gap-1 mb-3 border-b border-slate-200">
+									{(Object.entries(MODE_LABELS) as [AIMode, typeof MODE_LABELS[AIMode]][]).map(([mode, { label, icon }]) => (
+										<button
+											key={mode}
+											onClick={() => setActiveMode(mode)}
+											className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeMode === mode
+												? 'text-blue-600 border-blue-500 bg-blue-50'
+												: 'text-slate-500 border-transparent hover:text-slate-700 hover:bg-slate-50'
+												}`}
+										>
+											{icon}
+											{label}
+										</button>
+									))}
+								</div>
+
+								{/* Mode User Prompt */}
+								<div className="p-4 bg-purple-50 rounded-lg border border-purple-100">
+									<label className="block text-sm font-semibold text-purple-800 mb-2">
+										{MODE_LABELS[activeMode].label} User Prompt
+										<span className="text-xs text-purple-500 ml-2 font-normal">(Prepended to selected text)</span>
+									</label>
+									<textarea
+										value={prompts[activeMode].user}
+										onChange={(e) => updateModePrompt(activeMode, e.target.value)}
+										placeholder={`Enter ${MODE_LABELS[activeMode].label.toLowerCase()} user prompt...`}
+										className="w-full h-[150px] p-3 text-sm font-mono border border-purple-200 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+										disabled={isSaving}
+									/>
+								</div>
+							</div>
+						</div>
 					) : (
-						<div className="h-full">
-							<p className="text-sm text-slate-600 mb-3">
-								This prompt will be prepended to all AI requests for this project. Use it to set context, style guidelines, or specific instructions.
-							</p>
-							<textarea
-								value={content}
-								onChange={(e) => setContent(e.target.value)}
-								placeholder="Enter your system prompt here..."
-								className="w-full h-[400px] p-4 text-sm font-mono border border-slate-200 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-								disabled={isSaving}
-							/>
+						<div className="text-center text-slate-400 py-12">
+							Failed to load prompts
 						</div>
 					)}
 				</div>
 
 				{/* Footer */}
-				<div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-3">
+				<div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between">
 					<button
-						onClick={onClose}
-						disabled={isSaving}
-						className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors text-sm font-medium disabled:opacity-50"
-					>
-						Cancel
-					</button>
-					<button
-						onClick={handleSave}
+						onClick={handleReset}
 						disabled={isSaving || isLoading}
-						className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium flex items-center gap-2"
+						className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors text-sm font-medium flex items-center gap-2 disabled:opacity-50"
 					>
-						{saved ? (
-							<>
-								<CheckCircle size={16} />
-								Saved!
-							</>
-						) : isSaving ? (
-							<>
-								<Loader2 size={16} className="animate-spin" />
-								Saving...
-							</>
-						) : (
-							<>
-								<Save size={16} />
-								Save
-							</>
-						)}
+						<RotateCcw size={16} />
+						Reset to Defaults
 					</button>
+					<div className="flex gap-3">
+						<button
+							onClick={onClose}
+							disabled={isSaving}
+							className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors text-sm font-medium disabled:opacity-50"
+						>
+							Cancel
+						</button>
+						<button
+							onClick={handleSave}
+							disabled={isSaving || isLoading || !prompts}
+							className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium flex items-center gap-2"
+						>
+							{saved ? (
+								<>
+									<CheckCircle size={16} />
+									Saved!
+								</>
+							) : isSaving ? (
+								<>
+									<Loader2 size={16} className="animate-spin" />
+									Saving...
+								</>
+							) : (
+								<>
+									<Save size={16} />
+									Save All
+								</>
+							)}
+						</button>
+					</div>
 				</div>
 			</div>
-		</div>
+		</div>,
+		document.body
 	);
 };
 

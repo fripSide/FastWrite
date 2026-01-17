@@ -14,7 +14,7 @@ function App() {
   const [projectConfig, setProjectConfig] = useState<ProjectConfig | null>(null);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [scrollToLine, setScrollToLine] = useState<number | null>(null);
-  const [pdfScrollTarget, setPdfScrollTarget] = useState<{ page: number; x: number; y: number } | null>(null);
+  const [pdfScrollTarget, setPdfScrollTarget] = useState<{ page: number; x: number; y: number; lineCount?: number } | null>(null);
 
   // Toast State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'loading' } | null>(null);
@@ -147,7 +147,9 @@ function App() {
           const result = await response.json();
           console.log('[App] Forward sync result:', result);
           if (result.page) {
-            setPdfScrollTarget({ page: result.page, x: result.x, y: result.y });
+            // Get line count from selected text for highlight height
+            const lineCount = mainEditorRef.current?.getSelectedLineCount() || 1;
+            setPdfScrollTarget({ page: result.page, x: result.x, y: result.y, lineCount });
             setToast({ message: 'Sync complete', type: 'success' });
           } else {
             setToast({ message: 'No sync point found for this line', type: 'error' });
@@ -361,26 +363,28 @@ function App() {
               <div className="w-0.5 h-0.5 rounded-full bg-slate-400" />
             </div>
 
-            {/* Sync Buttons Pill - Flex flow (mb-2 to separate from collapse button) */}
-            <div className="flex flex-col gap-1.5 bg-white shadow-md rounded-full py-2 px-0.5 z-20 border border-slate-200 mb-4">
-              <button
-                onMouseDown={(e) => e.stopPropagation()} // Prevent drag start
-                onClick={(e) => { e.stopPropagation(); handleSyncToPDF(); }}
-                className="p-1 hover:bg-slate-100 rounded-full text-slate-500 hover:text-blue-600 transition-colors"
-                title="Sync to PDF (Forward Search)"
-              >
-                <ArrowRight size={14} />
-              </button>
-              <div className="h-px w-3 bg-slate-200 mx-auto" />
-              <button
-                onMouseDown={(e) => e.stopPropagation()} // Prevent drag start
-                onClick={(e) => { e.stopPropagation(); handleTriggerReverseSync(); }}
-                className="p-1 hover:bg-slate-100 rounded-full text-slate-500 hover:text-blue-600 transition-colors"
-                title="Sync to Editor (Reverse Search)"
-              >
-                <ArrowLeft size={14} />
-              </button>
-            </div>
+            {/* Sync Buttons Pill - Only show when PDF is expanded */}
+            {pdfWidth > 0 && (
+              <div className="flex flex-col gap-1.5 bg-white shadow-md rounded-full py-2 px-0.5 z-20 border border-slate-200 mb-4">
+                <button
+                  onMouseDown={(e) => e.stopPropagation()} // Prevent drag start
+                  onClick={(e) => { e.stopPropagation(); handleSyncToPDF(); }}
+                  className="p-1 hover:bg-slate-100 rounded-full text-slate-500 hover:text-blue-600 transition-colors"
+                  title="Sync to PDF (Forward Search)"
+                >
+                  <ArrowRight size={14} />
+                </button>
+                <div className="h-px w-3 bg-slate-200 mx-auto" />
+                <button
+                  onMouseDown={(e) => e.stopPropagation()} // Prevent drag start
+                  onClick={(e) => { e.stopPropagation(); handleTriggerReverseSync(); }}
+                  className="p-1 hover:bg-slate-100 rounded-full text-slate-500 hover:text-blue-600 transition-colors"
+                  title="Sync to Editor (Reverse Search)"
+                >
+                  <ArrowLeft size={14} />
+                </button>
+              </div>
+            )}
 
             {/* Collapse button - tall and slim */}
             <button

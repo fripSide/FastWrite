@@ -50,8 +50,10 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 	const [isCheckingLatex, setIsCheckingLatex] = useState(true);
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [clickedLocation, setClickedLocation] = useState<{ page: number; x: number; y: number } | null>(null);
+	const [highlightBox, setHighlightBox] = useState<{ page: number; x: number; y: number; width: number; height: number; lineCount: number } | null>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
+	const pageHeightsRef = useRef<Map<number, number>>(new Map());
 
 	// Check LaTeX installation status
 	useEffect(() => {
@@ -128,21 +130,33 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 		return () => resizeObserver.disconnect();
 	}, []);
 
-	// Handle scroll to sync location
+	// Handle scroll to sync location with highlight box
 	useEffect(() => {
-		if (scrollTo && pageRefs.current.has(scrollTo.page)) {
-			const pageEl = pageRefs.current.get(scrollTo.page);
-			if (pageEl) {
-				pageEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		if (scrollTo) {
+			// Check if y coordinate is near page bottom (synctex returns ~842 for A4 page height)
+			// If y > 750, content likely wrapped to next page
+			let targetPage = scrollTo.page;
+			let targetY = scrollTo.y;
 
-				const originalBg = pageEl.style.backgroundColor;
-				pageEl.style.backgroundColor = '#fef9c3'; // yellow-100
-				setTimeout(() => {
-					pageEl.style.backgroundColor = originalBg;
-				}, 1000);
+			if (pageRefs.current.has(targetPage)) {
+				const pageEl = pageRefs.current.get(targetPage);
+				if (pageEl) {
+					pageEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+					// Set highlight box at the adjusted location
+					const w = (scrollTo as any).width || 300;
+					const h = (scrollTo as any).height || 15;
+					const lineCount = (scrollTo as any).lineCount || 1;
+					setHighlightBox({ page: targetPage, x: scrollTo.x, y: targetY, width: w, height: h, lineCount });
+
+					// Clear highlight after 2 seconds
+					setTimeout(() => {
+						setHighlightBox(null);
+					}, 2000);
+				}
 			}
 		}
-	}, [scrollTo]);
+	}, [scrollTo, numPages]);
 
 	// Handle PDF load success
 	const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
@@ -304,11 +318,12 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 	const renderPages = () => {
 		const pages = [];
 		for (let i = 1; i <= numPages; i++) {
+			const showHighlight = highlightBox && highlightBox.page === i;
 			pages.push(
 				<div
 					key={i}
 					ref={(el) => { if (el) pageRefs.current.set(i, el); }}
-					className="mb-4 shadow-lg cursor-pointer hover:shadow-xl transition-shadow"
+					className="mb-4 shadow-lg cursor-pointer hover:shadow-xl transition-shadow relative"
 					onClick={(e) => handlePageClick(e, i)}
 				>
 					<Page
@@ -317,7 +332,42 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 						renderTextLayer={true}
 						renderAnnotationLayer={true}
 						className="bg-white"
+						onLoadSuccess={(page) => {
+							pageHeightsRef.current.set(i, page.originalHeight);
+						}}
 					/>
+					{/* Highlight box for text-to-PDF sync */}
+					{showHighlight && (() => {
+						// Synctex coordinates are bottom-up (0,0 is bottom-left)
+						// Web coordinates are top-down (0,0 is top-left)
+						// We need to invert the Y coordinate using the page height
+						const pageHeight = pageHeightsRef.current.get(i) || 842; // Default to A4 (842pt) if unknown
+
+						// Invert Y: newY = pageHeight - synctexY
+						// And apply scale
+						const visualY = (pageHeight - highlightBox.y);
+						const topPos = Math.max(0, visualY * scale - 15);
+
+						const count = highlightBox.lineCount || 1;
+						// Width logic can be improved but keeping simple for now
+						const boxHeight = Math.max(20, count * 15 * scale);
+
+						return (
+							<div
+								className="absolute pointer-events-none"
+								style={{
+									left: '10%',
+									top: topPos,
+									width: '80%',
+									height: boxHeight,
+									background: 'rgba(59, 130, 246, 0.2)',
+									border: '3px solid #3b82f6',
+									borderRadius: 6,
+									boxShadow: '0 0 15px rgba(59, 130, 246, 0.5)'
+								}}
+							/>
+						);
+					})()}
 				</div>
 			);
 		}

@@ -4,11 +4,11 @@ The rise of generative AI has transformed academic writing, but for computer sys
 
 \subsection{The Challenge}
 
-Top-tier conferences such as S\&P, OSDI, and CCS require an authoritative tone, precise terminology, and rigorous logical flow. These elements are essential for effectively communicating complex ideas and meeting the high standards of these venues. While Overleaf excels in providing a collaborative environment, it lacks deep integration with advanced AI assistance that can handle the nuances of academic LaTeX. This deficiency hinders both the efficiency and quality of the writing process, making it difficult to meet the stringent requirements of these conferences.
+Top-tier conferences such as S\&P, OSDI, and CCS demand an authoritative tone, precise terminology, and rigorous logical flow. These elements are crucial for effectively communicating complex ideas and meeting the high standards of these venues. While tools like Overleaf excel in providing collaborative environments, they lack deep integration with advanced AI assistance that can handle the nuances of academic LaTeX. This deficiency hinders both the efficiency and quality of the writing process, making it difficult to meet the stringent requirements of these conferences.
 
 To address this, integrating more sophisticated AI tools is essential. These tools should enhance the collaborative features of platforms like Overleaf and provide real-time feedback on structure, clarity, and technical accuracy. This integration would help authors produce papers that are technically sound, well-structured, and clearly articulated, thereby increasing their chances of acceptance at these highly competitive venues.
 
-Generic large language model (LLM) interfaces often generate verbose or hallucinatory text, necessitating extensive manual correction. Additionally, pasting sensitive drafts into cloud-based chatbots raises significant privacy concerns. These challenges underscore the need for more sophisticated and secure AI tools that can support the unique requirements of academic writing in computer systems and security.
+Generic large language model (LLM) interfaces often generate verbose or hallucinatory text, requiring extensive manual correction. Additionally, pasting sensitive drafts into cloud-based chatbots raises significant privacy concerns. These challenges highlight the need for more sophisticated and secure AI tools that can support the unique requirements of academic writing in computer systems and security.
 \subsection{Our Solution: FastWrite}
 To address these challenges, we introduce \textbf{FastWrite}, a privacy-focused, local-first LaTeX editor.
 FastWrite bridges the gap between traditional editors and modern AI capabilities.

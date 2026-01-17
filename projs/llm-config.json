@@ -1,5 +1,5 @@
 {
-  "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  "apiKey": "sk-081adacbc7d6451eaa95cfbcd2385b2d",
+  "baseUrl": "https://platform.vul337.team:8443/v1",
+  "apiKey": "sk-KnBWo9eWPShm50hkOy3V7KtytTKaNdG85pA3yuec6WGiJOty",
   "model": "qwen-max"
 }

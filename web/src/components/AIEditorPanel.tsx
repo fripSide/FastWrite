@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Search, Wand2, Zap, Maximize2, Minimize2, Send, Check, Bot, Settings, History, Trash2, X, Cog } from 'lucide-react';
 import type { TextItem, AIMode, DiffResult } from '../types';
 import { computeWordDiff } from '../utils/diff';
@@ -24,6 +25,8 @@ interface AIPanelProps {
   onResult: (result: DiffResult, modifiedContent: string, mode: AIMode) => void;
   onContentChange?: (content: string) => void;
   onFullscreenChange?: (isFullscreen: boolean) => void;
+  initialFullscreen?: boolean;
+  editorRef?: React.RefObject<HTMLDivElement | null>;
 }
 
 const AIPanel: React.FC<AIPanelProps> = ({
@@ -34,17 +37,28 @@ const AIPanel: React.FC<AIPanelProps> = ({
   onClose,
   onResult,
   onContentChange,
-  onFullscreenChange
+  onFullscreenChange,
+  initialFullscreen = false,
+  editorRef
 }) => {
   const [selectedMode, setSelectedMode] = useState<AIMode>('refine');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(initialFullscreen);
   const [showLLMSettings, setShowLLMSettings] = useState(false);
+  const [fullscreenStyle, setFullscreenStyle] = useState<React.CSSProperties>({});
 
   // User input
   const [userPrompt, setUserPrompt] = useState('');
   const [useSystemPrompt, setUseSystemPrompt] = useState(true);
-  const [systemPrompt, setSystemPrompt] = useState('');
+
+  // Project prompts loaded from backend (new structure)
+  interface ProjectPrompts {
+    system: string;
+    diagnose: { user: string };
+    refine: { user: string };
+    quickfix: { user: string };
+  }
+  const [projectPrompts, setProjectPrompts] = useState<ProjectPrompts | null>(null);
 
   // AI Result logic
   // We no longer keep local workingContent state, we use item.content directly
@@ -61,10 +75,48 @@ const AIPanel: React.FC<AIPanelProps> = ({
   // Prompt input ref for auto-resize
   const promptTextareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Load system prompt
+  // Calculate fullscreen position
+  useEffect(() => {
+    if (isFullscreen && editorRef?.current) {
+      const rect = editorRef.current.getBoundingClientRect();
+      setFullscreenStyle({
+        position: 'fixed',
+        top: rect.top,
+        left: rect.left,
+        width: rect.width,
+        height: rect.height,
+        zIndex: 50,
+      });
+
+      // Update on resize
+      const handleResize = () => {
+        if (editorRef.current) {
+          const updatedRect = editorRef.current.getBoundingClientRect();
+          setFullscreenStyle({
+            position: 'fixed',
+            top: updatedRect.top,
+            left: updatedRect.left,
+            width: updatedRect.width,
+            height: updatedRect.height,
+            zIndex: 50,
+          });
+        }
+      };
+
+      window.addEventListener('resize', handleResize);
+      return () => window.removeEventListener('resize', handleResize);
+    } else {
+      setFullscreenStyle({});
+    }
+  }, [isFullscreen, editorRef]);
+
+  // Load project prompts from backend
   useEffect(() => {
     if (projectId) {
-      api.getSystemPrompt(projectId).then(setSystemPrompt);
+      fetch(`/api/prompts/${projectId}`)
+        .then(res => res.json())
+        .then(data => setProjectPrompts(data))
+        .catch(err => console.error('Failed to load prompts:', err));
     }
   }, [projectId]);
 
@@ -80,11 +132,11 @@ const AIPanel: React.FC<AIPanelProps> = ({
       // Reset height to auto first to get accurate scrollHeight
       textarea.style.height = 'auto';
       const scrollHeight = textarea.scrollHeight;
-      const maxHeight = window.innerHeight * 0.5; // 50vh
+      const maxHeight = (fullscreenStyle.height as number || window.innerHeight) * 0.6; // 60% of container
       const minHeight = 150; // minimum height
       textarea.style.height = `${Math.max(minHeight, Math.min(scrollHeight, maxHeight))}px`;
     }
-  }, [item?.content, isFullscreen]);
+  }, [item?.content, isFullscreen, fullscreenStyle]);
 
   // Auto-resize prompt textarea
   useEffect(() => {
@@ -147,15 +199,12 @@ const AIPanel: React.FC<AIPanelProps> = ({
     setAiExplanation('');
 
     try {
-      const defaultPrompt = getDefaultModePrompt(selectedMode);
-      let fullPrompt = defaultPrompt;
+      // Get prompts - use shared system prompt + mode-specific user prompt
+      const systemPrompt = projectPrompts?.system || '';
+      let userPromptToSend = projectPrompts?.[selectedMode]?.user || getDefaultModePrompt(selectedMode);
 
       if (userPrompt.trim()) {
-        fullPrompt += '\n\nAdditional instructions: ' + userPrompt;
-      }
-
-      if (useSystemPrompt && systemPrompt) {
-        fullPrompt = systemPrompt + '\n\n' + fullPrompt;
+        userPromptToSend += '\n\nAdditional instructions: ' + userPrompt;
       }
 
       const response = await fetch('/api/ai/process', {
@@ -163,8 +212,9 @@ const AIPanel: React.FC<AIPanelProps> = ({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           mode: selectedMode,
-          content: item.content, // Use live content from MainEditor
-          userPrompt: fullPrompt
+          content: item.content,
+          systemPrompt: useSystemPrompt ? systemPrompt : undefined,
+          userPrompt: userPromptToSend
         })
       });
 
@@ -233,11 +283,11 @@ const AIPanel: React.FC<AIPanelProps> = ({
     }
   };
 
-  return (
-    <div className={`border-t-2 border-blue-500 bg-white flex flex-col shadow-lg transition-all ${isFullscreen
-      ? 'fixed inset-0 z-[100] h-screen w-screen'
-      : 'relative w-full mt-2 border-x border-b border-slate-200 rounded-b-lg mb-4'
-      }`}>
+  const panelContent = (
+    <div
+      className={`border-t-2 border-blue-500 bg-white flex flex-col shadow-lg transition-all ${!isFullscreen ? 'relative w-full mt-2 border-x border-b border-slate-200 rounded-b-lg mb-4' : ''}`}
+      style={isFullscreen ? fullscreenStyle : undefined}
+    >
 
       {/* Fullscreen Editor Mode - Simplified with integrated controls */}
       {isFullscreen && item && (
@@ -551,6 +601,12 @@ const AIPanel: React.FC<AIPanelProps> = ({
       />
     </div>
   );
+
+  if (isFullscreen) {
+    return createPortal(panelContent, document.body);
+  }
+
+  return panelContent;
 };
 
 export default AIPanel;

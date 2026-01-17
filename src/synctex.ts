@@ -142,7 +142,7 @@ function parseSynctexContent(content: string): SyncTexData {
 
 /**
  * Parse a single block line
- * Format: {type}{tag},{line}:{h},{v}:{other values} or {type}{tag},{line},{column}
+ * Format: {type}{tag},{line}:{h},{v}:{w},{H},{d} or {type}{tag},{line},{column}
  */
 function parseBlockLine(line: string, currentPage: number): SyncTexBlock | null {
 	const type = line[0] as SyncTexBlock['type'];
@@ -175,6 +175,20 @@ function parseBlockLine(line: string, currentPage: number): SyncTexBlock | null 
 		}
 		if (hvParts[1]) {
 			block.v = parseInt(hvParts[1], 10);
+		}
+	}
+
+	// Third part contains w,H,d (width, height, depth) (e.g., "0,0,0" or "1234567,654321,0")
+	if (colonParts[2]) {
+		const whdParts = colonParts[2].split(',');
+		if (whdParts[0]) {
+			block.w = parseInt(whdParts[0], 10);
+		}
+		if (whdParts[1]) {
+			block.H = parseInt(whdParts[1], 10);
+		}
+		if (whdParts[2]) {
+			block.d = parseInt(whdParts[2], 10);
 		}
 	}
 
@@ -254,7 +268,7 @@ export function sourceToPdf(
 	synctexData: SyncTexData,
 	filePath: string,
 	line: number
-): { page: number; x: number; y: number } | null {
+): { page: number; x: number; y: number; width: number; height: number } | null {
 	// Normalize file path (remove ./ and resolve)
 	const normalizeP = (p: string) => p.replace(/\/\.\//g, '/').replace(/^\.\//g, '');
 	const normalizedFilePath = normalizeP(filePath);
@@ -299,9 +313,39 @@ export function sourceToPdf(
 		return null;
 	}
 
-	// Prefer horizontal blocks? or validation needed
-	// For now take the first valid block
-	const block = blocks[0];
+	// When multiple blocks match, prefer:
+	// 1. If any block has y > 800 (page height ~842pt), prefer blocks on later pages
+	// 2. Otherwise, prefer the block with smallest y (closest to content start)
+	let block = blocks[0];
+
+	if (blocks.length > 1) {
+		// Sort by page (ascending), then by v/y coordinate (ascending)
+		blocks.sort((a, b) => {
+			// First, compare pages
+			if ((a.page || 0) !== (b.page || 0)) {
+				return (a.page || 0) - (b.page || 0);
+			}
+			// Same page, compare y (v) coordinate - prefer smaller y (top of page)
+			return (a.v || 0) - (b.v || 0);
+		});
+
+		const firstBlock = blocks[0];
+		if (firstBlock) {
+			// Check if first block's y is too close to page bottom (synctex returns ~842 for A4 page)
+			const firstY = (firstBlock.v || 0) * (synctexData.magnification / 1000 || 1) / 65536;
+			if (firstY > 780 && blocks.length > 1) {
+				// Content likely wrapped to next page, use the second block if on different page
+				const secondBlock = blocks.find(b => (b.page || 0) > (firstBlock.page || 0));
+				if (secondBlock) {
+					block = secondBlock;
+				} else {
+					block = firstBlock;
+				}
+			} else {
+				block = firstBlock;
+			}
+		}
+	}
 
 	if (!block || !block.page || block.h === undefined || block.v === undefined) {
 		return null;
@@ -311,14 +355,26 @@ export function sourceToPdf(
 	const unit = synctexData.unit || 1;
 	const mag = synctexData.magnification / 1000 || 1;
 
-	// PDF points = sp * mag / 65536
+	// PDF points
 	const x = block.h * mag / 65536;
 	const y = block.v * mag / 65536;
 
+	// Synctex usually returns coordinates from bottom-left (Y-up).
+	// We will handle inversion in the frontend where we know the page height.
+
+	// Get width and height if available
+	const rawW = block.w || block.W || 0;
+	const rawH = block.H || 0;
+	const w = (rawW * mag / 65536) || 300; // default width if 0
+	const h = (rawH * mag / 65536) || 15; // default height if 0
+
+
 	return {
 		page: block.page,
-		x: Math.round(x),
-		y: Math.round(y)
+		x: x,
+		y: Math.max(0, y), // Ensure non-negative
+		width: Math.round(w),
+		height: Math.round(h)
 	};
 }
 

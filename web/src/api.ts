@@ -22,19 +22,16 @@ export const api = {
   // Projects
   getProjects: () => fetchJson<Project[]>('/api/projects'),
 
+  getProjectConfig: (projectId: string) => fetchJson<import('./types').ProjectConfig>(`/api/projects/${projectId}/config`),
+
+  saveProjectConfig: (projectId: string, config: Partial<import('./types').ProjectConfig>) =>
+    postJson<import('./types').ProjectConfig>(`/api/projects/${projectId}/config`, config),
+
   importLocalProject: (path: string, name: string) =>
     postJson<Project>('/api/projects/import-local', { path, name }),
 
   importGitHubProject: (url: string, branch?: string) =>
     postJson<{ success: boolean; path: string; name: string }>('/api/projects/import-github', { url, branch }),
-
-  deleteProject: async (projectId: string) => {
-    const res = await fetch(`/api/projects/${projectId}`, { method: 'DELETE' });
-    return res.ok;
-  },
-
-  activateProject: (projectId: string) =>
-    postJson<{ success: boolean }>(`/api/projects/${projectId}/activate`, {}),
 
   browseDirectory: () => postJson<{ path: string | null }>('/api/utils/browse-directory', {}),
 
@@ -53,6 +50,13 @@ export const api = {
   getBackups: async (projectId: string) =>
     (await fetchJson<Backup[]>(`/api/backups/${projectId}`)) || [],
 
+  deleteBackups: async (projectId: string, filename?: string) => {
+    let url = `/api/backups/${projectId}`;
+    if (filename) url += `?filename=${encodeURIComponent(filename)}`;
+    const res = await fetch(url, { method: 'DELETE' });
+    return res.ok;
+  },
+
   // AI
   processAI: (mode: string, content: string, userPrompt?: string) =>
     postJson<{ content: string }>('/api/ai/process', { mode, content, userPrompt }),
@@ -63,14 +67,6 @@ export const api = {
       `/api/parse-sections?path=${encodeURIComponent(filePath)}`
     );
     return data?.sections || [];
-  },
-
-  // File Operations
-  readFile: async (filePath: string, projectId: string) => {
-    const data = await fetchJson<{ content: string; sections: Array<{ id: string; level: number; title: string; lineStart: number }> }>(
-      `/api/files/${encodeURIComponent(filePath)}?projectId=${encodeURIComponent(projectId)}`
-    );
-    return data;
   },
 
   writeFile: async (filePath: string, content: string, projectId: string, createBackup: boolean = true) => {

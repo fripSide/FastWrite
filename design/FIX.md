@@ -1,11 +1,27 @@
-### these implmentation should be fix or add
+### 检查并实现以下功能
 
+#### edit area 功能需求  
 
-1. 选择 Diagnose / Refine / QuickFix 模式，配置 prompts，运行 AI
-- Diagnose: 讨论论文结构
-- Refine: 语言润色，可以调整结构，删除冗余，补充知识，纠正说法。实现论文写作质量的提升
-- QuickFix: 语法检查，不改变意思，只修改语法、句法、拼写错误
+edit area支持以section/paragraph/sentence为单位进行编辑。呈现为三个界面，用户每次能选择其中一个界面。
 
-根据上面需求为这三个模式写合适的 prompts，作为place hold 默认prompt
+一旦apply了下面的ai修改。就该把三个界面对应的文字都改了，首先要改原始tex文件，然后要刷新三个界面的items树。最后让用户焦点仍然留在原来的位置。（所在的哪个界面可以不刷新，只是更新text box内容。其他两个用户没有选取的界面，文字也应更新，直接刷新好像是最简单的思路）
 
-并且这个prompt框的大小适宜内容，在5行以内不要滚动，超过5行才有滚动条
+#### 实现overleaf那样的PDF渲染和点击PDF定位
+
+1. 最右边放一个overleaf那样PDF视图，左：proj-bar，中edit area,右pdf view
+
+2. pdf view中点击某一行，edit area中定位到该行。同时 edit area中选择某个区域，pdf view中也跳转到该区域的文字。
+实现思路：文字在文件中的位置，预估滚动距离？或者模糊匹配所在的段落，由于PDF是渲染过的，因此和原始latex不完全一致，需要模糊匹配大段内容。pdf到文件，先定位在哪个latex，再定位在哪个item。文件到pdf，也是先定位到那一页，再滚动到对应的位置，同时在pdf上闪烁高亮一下对应的段落。
+
+3. 本地latex编译pdf，（如果没有编译环境，提示用户安装）
+
+4. 实现统一的prompt管理，前端prompt应该由后端提供。
+后端的默认prompt从本地加载，创建proj时将默认prompt存到本地。
+打开项目的时候，加载prompt。这样可以每个项目都有自己独立的prompt。
+前端的prompt从后端请求。并且用户修改之后可以存到本地。下次打开就又能加载上次修改的prompt。
+
+### 检查并修复以下Bug
+
+1. 在右边Pdf图里面配置的latex编译的main file。切换任何latex文件之后，仍然应该编译main， 当前main配置为main.tex， 这个是随机选取项目一级目录下的一个有 \documentclass 的latex文件。
+
+2. 点击pdf那里的左右跳转，要能正确关联和定位原文和pdf。

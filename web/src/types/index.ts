@@ -8,17 +8,19 @@ export interface Project {
   status: 'active' | 'archived';
 }
 
+export interface SelectedProject {
+  project: Project;
+  activeFileId?: string;
+  config?: ProjectConfig;
+}
+
 export interface ProjectConfig {
   projectId: string;
   sectionsDir: string;
   backupsDir: string;
-  mainFile?: string;
   bibFiles: string[];
-}
-
-export interface SelectedProject {
-  project: Project;
-  activeFileId?: string;
+  mainFile?: string;
+  compiler?: 'pdflatex' | 'xelatex' | 'lualatex';
 }
 
 // File Types
@@ -66,24 +68,6 @@ export interface TextItem {
   aiTimestamp?: string;
 }
 
-// AI Types
-export interface AIModeConfig {
-  systemPrompt: string;
-  model?: string;
-  temperature?: number;
-}
-
-export interface AIResponse {
-  requestId: string;
-  mode: AIMode;
-  itemId: string;
-  originalContent: string;
-  modifiedContent: string;
-  explanation?: string;
-  suggestions?: string[];
-  timestamp: string;
-}
-
 // Diff Types
 export interface DiffChange {
   type: 'addition' | 'deletion' | 'modification';
@@ -104,7 +88,6 @@ export interface DiffResult {
   };
 }
 
-// Legacy (for API compatibility)
 export interface Backup {
   id: string;
   filename: string;
@@ -112,7 +95,14 @@ export interface Backup {
   content: string;
 }
 
-export interface DiffItem {
-  type: 'unchanged' | 'added' | 'removed';
-  text: string;
+// LLM Provider for multi-API management
+export interface LLMProvider {
+  id: string;
+  name: string;
+  baseUrl: string;
+  apiKey: string;
+  models: string[];
+  selectedModel: string;
+  isActive: boolean;
+  createdAt: number;
 }
