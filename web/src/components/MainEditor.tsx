@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { ChevronDown, ChevronRight, FileText, Clock, FolderOpen, Check, Loader2 } from 'lucide-react';
-import type { SelectedFile, SelectedProject, ViewMode, TextItem, DiffResult, AIMode } from '../types';
+import type { SelectedFile, SelectedProject, ViewMode, TextItem, DiffResult, AIMode, ChatMessage } from '../types';
 import { parseContent } from '../utils/parser';
 import AIEditorPanel from './AIEditorPanel';
 import BackupTimeline from './BackupTimeline';
@@ -16,9 +16,10 @@ interface MainEditorProps {
   selectedProject: SelectedProject | null;
   scrollToLine?: number | null;
   onSyncToPDF?: (page: number, x: number, y: number) => void;
+  onSaveSuccess?: () => void;
 }
 
-const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, selectedProject, scrollToLine, onSyncToPDF }, ref) => {
+const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, selectedProject, scrollToLine, onSyncToPDF, onSaveSuccess }, ref) => {
   const [viewMode, setViewMode] = useState<ViewMode>('section');
   const [items, setItems] = useState<TextItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<TextItem | null>(null);
@@ -31,10 +32,16 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
 
   // Auto-save state
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const [isDirty, setIsDirty] = useState(false);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const pendingContentRef = useRef<string>('');
 
-  // Debounced save function
+  // AI Cache Persistence
+  const [aiHistories, setAiHistories] = useState<Record<string, ChatMessage[]>>({});
+  const [isHistoryLoaded, setIsHistoryLoaded] = useState(false);
+  const aiSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Debounced save for Content
   const debouncedSave = useCallback(async () => {
     if (!selectedFile || !selectedProject) return;
 
@@ -47,24 +54,66 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
         true
       );
       setSaveStatus('saved');
+      setIsDirty(false);
       setTimeout(() => setSaveStatus('idle'), 2000);
+      if (onSaveSuccess) onSaveSuccess();
     } catch (error) {
       console.error('Auto-save failed:', error);
       setSaveStatus('idle');
     }
   }, [selectedFile, selectedProject]);
 
+  // Load AI Cache
+  useEffect(() => {
+    if (selectedProject?.project.id) {
+      setIsHistoryLoaded(false);
+      setAiHistories({});
+      fetch(`/api/projects/${selectedProject.project.id}/ai-cache`)
+        .then(res => res.json())
+        .then(data => {
+          if (data && !data.error) {
+            setAiHistories(data);
+          }
+          setIsHistoryLoaded(true);
+        })
+        .catch(err => {
+          console.error('Failed to load AI cache:', err);
+          setIsHistoryLoaded(true);
+        });
+    }
+  }, [selectedProject?.project.id]);
+
+  // Debounced Save AI Cache
+  useEffect(() => {
+    if (!selectedProject?.project.id || !isHistoryLoaded) return;
+
+    if (aiSaveTimerRef.current) clearTimeout(aiSaveTimerRef.current);
+
+    aiSaveTimerRef.current = setTimeout(() => {
+      fetch(`/api/projects/${selectedProject.project.id}/ai-cache`, {
+        method: 'POST',
+        body: JSON.stringify(aiHistories)
+      }).catch(err => console.error('Failed to save AI cache', err));
+    }, 2000);
+
+    return () => {
+      if (aiSaveTimerRef.current) clearTimeout(aiSaveTimerRef.current);
+    };
+  }, [aiHistories, selectedProject?.project.id, isHistoryLoaded]);
+
   // Schedule save after content change
   const scheduleSave = useCallback((newContent: string) => {
     pendingContentRef.current = newContent;
+    setIsDirty(true);
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(debouncedSave, 3000);
   }, [debouncedSave]);
 
-  // Cleanup timer on unmount
+  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      if (aiSaveTimerRef.current) clearTimeout(aiSaveTimerRef.current);
     };
   }, []);
 
@@ -80,13 +129,104 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
     }
   }, [selectedItem?.id]);
 
+  // Focus the textarea when selectedItem changes
+  useEffect(() => {
+    if (selectedItem) {
+      const focusTextarea = () => {
+        const textarea = document.getElementById(`edit-textarea-${selectedItem.id}`) as HTMLTextAreaElement;
+        if (textarea) {
+          textarea.focus();
+          // Move cursor to end
+          textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+          return true;
+        }
+        return false;
+      };
+
+      // Try immediately, then with delays
+      if (!focusTextarea()) {
+        setTimeout(() => {
+          if (!focusTextarea()) {
+            setTimeout(focusTextarea, 100);
+          }
+        }, 50);
+      }
+    }
+  }, [selectedItem?.id]);
+
+  // Cleanup empty items on blur
+  const prevSelectedIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prevId = prevSelectedIdRef.current;
+
+    // If selected item changed
+    if (prevId && prevId !== selectedItem?.id) {
+      setItems(currentItems => {
+        // Helper to find item
+        const findItem = (list: TextItem[]): TextItem | undefined => {
+          for (const item of list) {
+            if (item.id === prevId) return item;
+            if (item.children) {
+              const found = findItem(item.children);
+              if (found) return found;
+            }
+          }
+          return undefined;
+        }
+
+        const prevItem = findItem(currentItems);
+
+        // Only delete if it is empty AND not the only item left
+        if (prevItem && prevItem.content.trim() === '' && currentItems.length > 1) {
+          const deleteItem = (list: TextItem[]): TextItem[] => {
+            return list.flatMap(item => {
+              if (item.id === prevId) return [];
+              if (item.children) {
+                return [{ ...item, children: deleteItem(item.children) }];
+              }
+              return [item];
+            });
+          };
+
+          const newItems = deleteItem(currentItems);
+
+          // Trigger save update for the deletion
+          setTimeout(() => {
+            const flatten = (list: TextItem[]): TextItem[] => {
+              return list.flatMap(x => [x, ...(x.children ? flatten(x.children) : [])]);
+            };
+            // Use flatten for safety, similar to handleContentUpdate logic needed
+            // But simple sentence mode is flat.
+            const allItems = flatten(newItems);
+
+            // For section mode, joining map(content) relies on parser structure. 
+            // Using simplistic join for now mirroring existing logic.
+            // Note: MainEditor assumes structure is appropriate for saving.
+            const str = newItems.map(i => i.content).join('\n');
+            scheduleSave(str);
+          }, 0);
+
+          return newItems;
+        }
+        return currentItems;
+      });
+    }
+    prevSelectedIdRef.current = selectedItem?.id || null;
+  }, [selectedItem?.id]);
+
   useEffect(() => {
     if (selectedFile?.content) {
-      const parsed = parseContent(selectedFile.content, viewMode);
+      // When mode changes, use pending (edited) content if available, otherwise use file content
+      const contentToUse = pendingContentRef.current || selectedFile.content;
+      const parsed = parseContent(contentToUse, viewMode);
       setItems(parsed);
       setSelectedItem(null);
-      setCurrentContent(selectedFile.content);
-      pendingContentRef.current = selectedFile.content;
+      // Only reset content state when file changes, not when mode changes
+      if (!pendingContentRef.current) {
+        setCurrentContent(selectedFile.content);
+        pendingContentRef.current = selectedFile.content;
+        setIsDirty(false);
+      }
     }
   }, [selectedFile, viewMode]);
 
@@ -105,6 +245,7 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
   useImperativeHandle(ref, () => ({
     getCurrentLine: () => {
       // 1. If an item is selected, use its line
+      console.log('[MainEditor] getCurrentLine called. selectedItem:', selectedItem?.id, 'lineStart:', selectedItem?.lineStart);
       if (selectedItem?.lineStart) {
         return selectedItem.lineStart;
       }
@@ -131,6 +272,7 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
 
   // Handle scroll to line from PDF sync - also select the item
   useEffect(() => {
+    if (scrollToLine) console.log('[MainEditor] scrollToLine effect triggered:', scrollToLine, 'items:', items.length);
     if (scrollToLine && items.length > 0) {
       const flatItems = flattenItems(items);
       // Find the item containing this line (reversed to find closest match)
@@ -206,20 +348,53 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
   };
 
   const handleContentUpdate = (itemId: string, newContent: string) => {
+    let nextSelectedItem: TextItem | null = null;
+
     const updateContent = (items: TextItem[]): TextItem[] => {
-      return items.map(i => {
+      return items.flatMap(i => {
         if (i.id === itemId) {
-          return { ...i, content: newContent };
+          // 2. Handle Splitting (Newline) - ONLY in sentence mode
+          if (viewMode === 'sentence' && newContent.includes('\n')) {
+            const parts = newContent.split('\n');
+            const newItems: TextItem[] = parts.map((part, index) => {
+              const isOriginal = index === 0;
+              const newItem: TextItem = {
+                ...i,
+                id: isOriginal ? i.id : `${i.id}-split-${Date.now()}-${index}`,
+                content: part,
+              };
+              return newItem;
+            });
+
+            if (newItems.length > 1) {
+              nextSelectedItem = newItems[1];
+            }
+            return newItems;
+          }
+
+          return [{ ...i, content: newContent }];
         }
+
         if (i.children) {
-          return { ...i, children: updateContent(i.children) };
+          return [{ ...i, children: updateContent(i.children) }];
         }
-        return i;
+        return [i];
       });
     };
+
     const updatedItems = updateContent(items);
     setItems(updatedItems);
-    setSelectedItem(prev => prev?.id === itemId ? { ...prev, content: newContent } : prev);
+
+    if (nextSelectedItem) {
+      setSelectedItem(nextSelectedItem);
+    } else {
+      const stillExists = updatedItems.some(x => x.id === itemId) || updatedItems.some(x => flattenItems([x]).some(y => y.id === itemId));
+      if (stillExists) {
+        setSelectedItem(prev => prev?.id === itemId ? { ...prev, content: newContent } : prev);
+      } else {
+        setSelectedItem(null);
+      }
+    }
 
     const fullContent = updatedItems.map(i => i.content).join('\n');
     scheduleSave(fullContent);
@@ -240,6 +415,7 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
         setCurrentContent(newContent);
         const parsed = parseContent(newContent, viewMode);
         setItems(parsed);
+        if (onSaveSuccess) onSaveSuccess();
       }
     } catch (error) {
       console.error('Failed to save file:', error);
@@ -287,7 +463,8 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
     const hasChildren = item.children && item.children.length > 0;
 
     if ((viewMode === 'sentence' || viewMode === 'paragraph') && item.content === '') {
-      return null;
+      // Allow rendering empty items if they are SELECTED
+      if (!isSelected) return null;
     }
 
     if (viewMode === 'section' && hasChildren) {
@@ -350,6 +527,18 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
                     e.target.style.height = 'auto';
                     e.target.style.height = Math.min(e.target.scrollHeight, window.innerHeight * 0.5) + 'px';
                   }}
+                  onKeyDown={(e) => {
+                    // In sentence mode, intercept Enter to create new box
+                    if (viewMode === 'sentence' && e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault();
+                      const textarea = e.target as HTMLTextAreaElement;
+                      const cursorPos = textarea.selectionStart;
+                      const beforeCursor = item.content.slice(0, cursorPos);
+                      const afterCursor = item.content.slice(cursorPos);
+                      // Split at cursor position
+                      handleContentUpdate(item.id, beforeCursor + '\n' + afterCursor);
+                    }
+                  }}
                   onClick={(e) => e.stopPropagation()}
                   ref={(el) => {
                     if (el) {
@@ -362,7 +551,7 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
                 />
               ) : (
                 <div className="text-sm text-slate-700 whitespace-pre-wrap font-mono">
-                  {item.content}
+                  {item.content || <br />}
                 </div>
               )}
             </div>
@@ -376,6 +565,9 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
             item={item}
             fileContent=""
             projectId={selectedProject?.project.id || ''}
+            currentFilePath={selectedFile?.path}
+            histories={aiHistories}
+            onHistoryChange={setAiHistories}
             onClose={() => setSelectedItem(null)}
             onResult={handleAIResult}
             onContentChange={(newContent) => handleContentUpdate(item.id, newContent)}
@@ -397,14 +589,18 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
               <FileText size={16} className="text-orange-500" />
               <h2 className="text-sm font-semibold text-slate-800">{selectedFile.name}</h2>
               {/* Save Status Indicator */}
-              {saveStatus === 'saving' && (
+              {saveStatus === 'saving' ? (
                 <span className="flex items-center gap-1 text-[10px] text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded-full">
                   <Loader2 size={10} className="animate-spin" />
                   Saving...
                 </span>
-              )}
-              {saveStatus === 'saved' && (
-                <span className="flex items-center gap-1 text-[10px] text-green-600 bg-green-50 px-1.5 py-0.5 rounded-full">
+              ) : isDirty ? (
+                <span className="flex items-center gap-1 text-[10px] text-orange-600 bg-orange-50 px-1.5 py-0.5 rounded-full" title="Changes not yet saved to disk">
+                  <div className="w-2 h-2 rounded-full bg-orange-500"></div>
+                  Unsaved
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-[10px] text-slate-400 px-1.5 py-0.5 rounded-full">
                   <Check size={10} />
                   Saved
                 </span>

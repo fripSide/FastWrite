@@ -168,38 +168,157 @@ function parseSections(content: string): TextItem[] {
 }
 
 function parseParagraphs(content: string): TextItem[] {
-  const paragraphs = content.split(/\n[ \t]*\n+/).filter(p => p.trim().length > 0);
+  const lines = content.split('\n');
   const items: TextItem[] = [];
+  let currentPara: string[] = [];
+  let paraStartLine = 1;
+  let paraIndex = 0;
 
-  paragraphs.forEach((para, index) => {
-    items.push({
-      id: `paragraph-${index + 1}`,
-      content: para.trim(),
-      type: 'paragraph',
-      status: 'unchanged'
-    });
-
-    // Insert separator if not last
-    if (index < paragraphs.length - 1) {
+  const flush = (nextStartLine: number) => {
+    if (currentPara.length > 0) {
+      paraIndex++;
       items.push({
-        id: `para-sep-${index}`,
-        content: '',
+        id: `paragraph-${paraIndex}`,
+        content: currentPara.join('\n').trim(),
         type: 'paragraph',
+        lineStart: paraStartLine,
         status: 'unchanged'
       });
+      currentPara = [];
     }
-  });
+    paraStartLine = nextStartLine;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineNum = i + 1;
+    const trimmed = line.trim();
+
+    if (trimmed === '') {
+      // Empty line - flush current paragraph
+      flush(lineNum + 1);
+    } else {
+      // Check for implicit splitters: Sections or Block Environments
+      // If we see a section header, it should be its own block (or start a new one)
+      const isSection = /^\s*\\(section|subsection|subsubsection|chapter|paragraph|subparagraph)\*?\{/.test(line);
+      const isBeginEnv = /^\s*\\begin\{/.test(line);
+      const isEndEnv = /^\s*\\end\{/.test(line);
+
+      // If we encounter a section or begin/end env, flush previous content first
+      // But only if currentPara is not empty.
+      // Exception: If currentPara is just started (length 0), we don't need to flush.
+      if ((isSection || isBeginEnv || isEndEnv) && currentPara.length > 0) {
+        flush(lineNum);
+      }
+
+      if (currentPara.length === 0) {
+        paraStartLine = lineNum;
+      }
+      currentPara.push(line);
+
+      // If it's a section header, force flush immediately so it stands alone?
+      // Or if it's \end{...}, flush after?
+      // Let's keep sections distinct.
+      if (isSection) {
+        flush(lineNum + 1);
+      }
+      // For environments, we might want to keep the whole environment as one paragraph/block?
+      // But parseSentences has complex logic for that.
+      // parseParagraphs simple approach: split on \begin and \end boundaries.
+      // If we flush on \end, then the environment is grouped with preceding lines?
+      // No, we flushed BEFORE \begin. So inner content starts new para.
+      // If we flush AFTER \end, inner content is grouping until \end.
+
+      if (isEndEnv) {
+        flush(lineNum + 1);
+      }
+    }
+  }
+
+  // Save last paragraph
+  flush(0);
 
   return items;
 }
 
 function parseSentences(content: string): TextItem[] {
-  const sentences = parseAtomicBlocks(content);
+  const lines = content.split('\n');
+  const items: TextItem[] = [];
+  let sentenceIndex = 0;
 
-  return sentences.map((sentence, index) => ({
-    id: `sentence-${index + 1}`,
-    content: sentence,
-    type: 'sentence', // We treat blocks as "sentences" for ViewMode purposes
-    status: 'unchanged'
-  }));
+  // Block environments that should not be split (kept as single items)
+  const blockEnvs = ['table', 'figure', 'algorithm', 'tabular', 'equation', 'itemize', 'enumerate', 'align', 'lstlisting', 'verbatim', 'abstract'];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const lineNum = i + 1;
+
+    if (line.trim() === '') {
+      continue; // Skip empty lines
+    }
+
+    // Check if this is a section/subsection header - treat as single item
+    if (line.match(/^\s*\\(section|subsection|subsubsection|chapter|paragraph)\*?\{/)) {
+      sentenceIndex++;
+      items.push({
+        id: `sentence-${sentenceIndex}`,
+        content: line.trim(),
+        type: 'sentence',
+        lineStart: lineNum,
+        status: 'unchanged'
+      });
+      continue;
+    }
+
+    // Check if this is a block environment start (only specific ones, not document)
+    const envMatch = line.match(/^\s*\\begin\{(\w+)\*?\}/);
+    if (envMatch && blockEnvs.includes(envMatch[1])) {
+      const envName = envMatch[1];
+      let blockContent = line;
+      let blockStart = lineNum;
+      let depth = 1;
+      let j = i + 1;
+
+      while (j < lines.length && depth > 0) {
+        const checkLine = lines[j];
+        if (checkLine.includes(`\\begin{${envName}`)) depth++;
+        if (checkLine.includes(`\\end{${envName}`)) depth--;
+        blockContent += '\n' + checkLine;
+        j++;
+      }
+      i = j - 1; // Skip processed lines
+
+      sentenceIndex++;
+      items.push({
+        id: `sentence-${sentenceIndex}`,
+        content: blockContent.trim(),
+        type: 'sentence',
+        lineStart: blockStart,
+        status: 'unchanged'
+      });
+      continue;
+    }
+
+    // Regular text line - split by sentence-ending punctuation
+    const trimmedLine = line.trim();
+    if (trimmedLine.length > 0) {
+      const sentences = trimmedLine
+        .split(/(?<=[.!?])\s+(?=[A-Z])/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+
+      for (const sentence of sentences) {
+        sentenceIndex++;
+        items.push({
+          id: `sentence-${sentenceIndex}`,
+          content: sentence,
+          type: 'sentence',
+          lineStart: lineNum,
+          status: 'unchanged'
+        });
+      }
+    }
+  }
+
+  return items;
 }

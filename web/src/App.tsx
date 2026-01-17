@@ -154,12 +154,16 @@ function App() {
           } else {
             setToast({ message: 'No sync point found for this line', type: 'error' });
           }
-        } else if (response.status === 404) {
-          console.error('[App] Forward sync API not found (404)');
-          setToast({ message: "Sync API not found. Please restart 'bun run dev'", type: 'error' });
         } else {
-          console.error('[App] Forward sync failed:', response.status, response.statusText);
-          setToast({ message: 'Sync failed: Server error', type: 'error' });
+          let errorMessage = `Sync failed (${response.status})`;
+          try {
+            const errorData = await response.json();
+            if (errorData.error) errorMessage = errorData.error;
+          } catch (e) {
+            console.error('Failed to parse error response', e);
+          }
+          console.warn(`[App] Forward sync failed: ${errorMessage}`);
+          setToast({ message: errorMessage, type: 'error' });
         }
       } catch (error) {
         console.error('Manual forward sync failed:', error);
@@ -300,6 +304,10 @@ function App() {
             onImportClick={() => setIsImportModalOpen(true)}
             onFileSelect={handleFileSelect}
             onProjectDelete={loadProjects}
+            onSectionClick={(lineNumber) => {
+              setScrollToLine(lineNumber);
+              setTimeout(() => setScrollToLine(null), 100);
+            }}
           />
         </div>
 
@@ -343,6 +351,7 @@ function App() {
             selectedProject={selectedProject}
             scrollToLine={scrollToLine}
             onSyncToPDF={(page, x, y) => setPdfScrollTarget({ page, x, y })} // Pass sync handler
+            onSaveSuccess={() => pdfViewerRef.current?.compile()}
           />
         </div>
 
