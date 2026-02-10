@@ -1,19 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Search, Wand2, Zap, Maximize2, Minimize2, Send, Check, Bot, Settings, History, Trash2, X, Cog } from 'lucide-react';
-import type { TextItem, AIMode, DiffResult } from '../types';
+import { Search, Wand2, Zap, Maximize2, Minimize2, Send, Check, Bot, Settings, History, Trash2, X, Cog, Code } from 'lucide-react';
+import type { TextItem, AIMode, DiffResult, ChatMessage } from '../types';
 import { computeWordDiff } from '../utils/diff';
 import { api } from '../api';
 import DiffViewer from './DiffViewer';
 import LLMSettingsModal from './LLMSettingsModal';
-
-interface ChatMessage {
-  id: string;
-  role: 'user' | 'ai';
-  content: string;
-  suggestion?: string;
-  timestamp: Date;
-}
 
 interface AIPanelProps {
   isOpen: boolean;
@@ -21,12 +13,16 @@ interface AIPanelProps {
   item: TextItem | null;
   fileContent: string;
   projectId: string;
+  currentFilePath?: string; // New prop for history scoping
+  histories: Record<string, ChatMessage[]>; // Lifted state
+  onHistoryChange: (histories: Record<string, ChatMessage[]>) => void; // Lifted state setter
   onClose: () => void;
   onResult: (result: DiffResult, modifiedContent: string, mode: AIMode) => void;
   onContentChange?: (content: string) => void;
   onFullscreenChange?: (isFullscreen: boolean) => void;
   initialFullscreen?: boolean;
   editorRef?: React.RefObject<HTMLDivElement | null>;
+  embedded?: boolean;
 }
 
 const AIPanel: React.FC<AIPanelProps> = ({
@@ -34,18 +30,25 @@ const AIPanel: React.FC<AIPanelProps> = ({
   selectedItemId,
   item,
   projectId,
+  currentFilePath,
+  histories,
+  onHistoryChange,
   onClose,
   onResult,
   onContentChange,
   onFullscreenChange,
   initialFullscreen = false,
-  editorRef
+  editorRef,
+  embedded = false
 }) => {
   const [selectedMode, setSelectedMode] = useState<AIMode>('refine');
+  // ... (lines 43-318 unchanged)
+
   const [isProcessing, setIsProcessing] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(initialFullscreen);
   const [showLLMSettings, setShowLLMSettings] = useState(false);
   const [fullscreenStyle, setFullscreenStyle] = useState<React.CSSProperties>({});
+  const [showRawHistory, setShowRawHistory] = useState(false);
 
   // User input
   const [userPrompt, setUserPrompt] = useState('');
@@ -61,12 +64,14 @@ const AIPanel: React.FC<AIPanelProps> = ({
   const [projectPrompts, setProjectPrompts] = useState<ProjectPrompts | null>(null);
 
   // AI Result logic
-  // We no longer keep local workingContent state, we use item.content directly
   const [aiResultContent, setAiResultContent] = useState<string | null>(null);
   const [aiExplanation, setAiExplanation] = useState('');
 
-  // Chat history
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  // Persistent Chat History (Lifted)
+  // const [histories, setHistories] = useState<Record<string, ChatMessage[]>>({ }); // Removed
+  const currentHistoryKey = `${currentFilePath || 'unknown'}:${selectedMode}`;
+  const chatHistory = histories[currentHistoryKey] || [];
+
   const [showHistory, setShowHistory] = useState(false);
 
   // Fullscreen editor ref for auto-resize
@@ -112,13 +117,13 @@ const AIPanel: React.FC<AIPanelProps> = ({
 
   // Load project prompts from backend
   useEffect(() => {
-    if (projectId) {
+    if (projectId && isOpen) {
       fetch(`/api/prompts/${projectId}`)
         .then(res => res.json())
         .then(data => setProjectPrompts(data))
         .catch(err => console.error('Failed to load prompts:', err));
     }
-  }, [projectId]);
+  }, [projectId, isOpen]);
 
   // Reset AI state when selected item changes (but not when content of same item changes)
   useEffect(() => {
@@ -145,41 +150,53 @@ const AIPanel: React.FC<AIPanelProps> = ({
       textarea.style.height = 'auto';
       const scrollHeight = textarea.scrollHeight;
       const lineHeight = 20; // approximate line height for text-sm
-      const maxLines = 5;
+      const maxLines = 10; // Increased max lines to show more config prompt
       const maxHeight = lineHeight * maxLines + 20; // + padding
       textarea.style.height = `${Math.min(scrollHeight, maxHeight)}px`;
-      textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden'; // Show scrollbar only if needed
+      textarea.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
     }
   }, [userPrompt]);
 
-  // Update user prompt when mode changes
+  // Pre-fill user prompt when mode changes or prompts load
   useEffect(() => {
-    setUserPrompt(getDefaultModePrompt(selectedMode));
-  }, [selectedMode]);
+    if (projectPrompts) {
+      const configuredPrompt = projectPrompts[selectedMode]?.user || '';
+      setUserPrompt(configuredPrompt);
+    }
+  }, [selectedMode, projectPrompts]);
+
+  // DO NOT overwrite user input with defaults when mode changes
+  // We want the textarea to remain empty for "additional instructions"
+  // or preserve what the user typed if they switch modes.
+
+  // Helper to add message to current history
+  const addMessageToHistory = (msg: ChatMessage) => {
+    onHistoryChange({
+      ...histories,
+      [currentHistoryKey]: [...(histories[currentHistoryKey] || []), msg]
+    });
+  };
+
+  // Helper to clear history for current mode
+  const clearCurrentHistory = () => {
+    onHistoryChange({
+      ...histories,
+      [currentHistoryKey]: []
+    });
+  };
 
   const resetAIState = () => {
     setAiResultContent(null);
     setAiExplanation('');
-    setAiExplanation('');
-    setUserPrompt(getDefaultModePrompt(selectedMode));
-    setChatHistory([]);
+    const configuredPrompt = projectPrompts?.[selectedMode]?.user || '';
+    setUserPrompt(configuredPrompt); // Reset to configured prompt
+    // History is now persistent per key, so we don't clear it on item change unless explicitly requested.
   };
 
   const handleClearContext = () => {
-    setChatHistory([]);
+    clearCurrentHistory();
     setAiResultContent(null);
     setAiExplanation('');
-  };
-
-  const getDefaultModePrompt = (mode: AIMode): string => {
-    switch (mode) {
-      case 'diagnose':
-        return 'Analyze and discuss the paper structure, logical flow, and organization. Identify issues and provide constructive feedback.';
-      case 'refine':
-        return 'Refine the writing: improve structure, remove redundancy, add necessary context, and correct expressions to enhance overall quality.';
-      case 'quickfix':
-        return 'Check grammar, syntax, and spelling without changing the meaning. Return only corrected text.';
-    }
   };
 
   const handleRunAI = async () => {
@@ -192,7 +209,7 @@ const AIPanel: React.FC<AIPanelProps> = ({
       content: userPrompt || 'Refine this content',
       timestamp: new Date()
     };
-    setChatHistory(prev => [...prev, userMsg]);
+    addMessageToHistory(userMsg);
 
     setIsProcessing(true);
     setAiResultContent(null);
@@ -201,11 +218,20 @@ const AIPanel: React.FC<AIPanelProps> = ({
     try {
       // Get prompts - use shared system prompt + mode-specific user prompt
       const systemPrompt = projectPrompts?.system || '';
-      let userPromptToSend = projectPrompts?.[selectedMode]?.user || getDefaultModePrompt(selectedMode);
 
-      if (userPrompt.trim()) {
-        userPromptToSend += '\n\nAdditional instructions: ' + userPrompt;
+      // We now pre-fill the textarea with the configured prompt, so we send the textarea content directly.
+      // This allows the user to fully edit the instruction.
+      const userPromptToSend = userPrompt;
+
+      if (!userPromptToSend.trim()) {
+        // If empty, maybe alert user? Or send empty (backend might use default default?)
       }
+
+      // Prepare context from history
+      const previousHistory = chatHistory.map(m => ({
+        role: m.role,
+        content: m.role === 'ai' && m.suggestion ? m.suggestion : m.content // Use suggestion for AI role if available, otherwise explanation
+      }));
 
       const response = await fetch('/api/ai/process', {
         method: 'POST',
@@ -214,7 +240,8 @@ const AIPanel: React.FC<AIPanelProps> = ({
           mode: selectedMode,
           content: item.content,
           systemPrompt: useSystemPrompt ? systemPrompt : undefined,
-          userPrompt: userPromptToSend
+          userPrompt: userPromptToSend, // This now contains Configured Prompt + User Input
+          history: previousHistory
         })
       });
 
@@ -222,10 +249,19 @@ const AIPanel: React.FC<AIPanelProps> = ({
         throw new Error('AI processing failed');
       }
 
-      const data = await response.json() as { content: string; explanation?: string };
+      const data = await response.json() as { content: string; explanation?: string; model?: string };
 
       setAiResultContent(data.content);
       setAiExplanation(data.explanation || '');
+
+      let modelName = data.model;
+      // Fallback: If backend is stale (no model returned), fetch current config
+      if (!modelName) {
+        try {
+          const config = await api.getLLMConfig();
+          if (config?.model) modelName = config.model;
+        } catch (e) { console.error("Failed to fetch fallback model", e); }
+      }
 
       // Add AI response to history
       const aiMsg: ChatMessage = {
@@ -233,17 +269,18 @@ const AIPanel: React.FC<AIPanelProps> = ({
         role: 'ai',
         content: data.explanation || 'Here is the suggested revision.',
         suggestion: data.content,
+        model: modelName,
         timestamp: new Date()
       };
-      setChatHistory(prev => [...prev, aiMsg]);
+      addMessageToHistory(aiMsg);
 
     } catch (error) {
       console.error('AI error:', error);
       setAiExplanation('Error: Failed to process. Please try again.');
     } finally {
       setIsProcessing(false);
-      setUserPrompt('');
     }
+    setUserPrompt('');
   };
 
   const handleApplyAIResult = () => {
@@ -285,7 +322,12 @@ const AIPanel: React.FC<AIPanelProps> = ({
 
   const panelContent = (
     <div
-      className={`border-t-2 border-blue-500 bg-white flex flex-col shadow-lg transition-all ${!isFullscreen ? 'relative w-full mt-2 border-x border-b border-slate-200 rounded-b-lg mb-4' : ''}`}
+      className={`bg-white flex flex-col transition-all ${isFullscreen
+        ? ''
+        : embedded
+          ? 'relative w-full border-t border-slate-100 rounded-b-lg mt-4'
+          : 'relative w-full mt-2 border border-slate-200 rounded-b-lg mb-4 shadow-lg border-t-2 border-t-blue-500'
+        }`}
       style={isFullscreen ? fullscreenStyle : undefined}
     >
 
@@ -360,11 +402,10 @@ const AIPanel: React.FC<AIPanelProps> = ({
 
       {/* Header Bar with Mode Selector - Hidden in fullscreen */}
       {!isFullscreen && (
-        <div className="flex items-center justify-between px-4 py-2 bg-gradient-to-r from-blue-50 to-white border-b border-slate-200">
+        <div className="flex items-center justify-between px-4 py-2 bg-slate-50 border-b border-slate-200">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></div>
-              <h3 className="text-sm font-bold text-slate-800">AI Editor</h3>
+              <h3 className="text-sm font-bold text-slate-700">AI Editor</h3>
             </div>
 
             {/* Mode selector */}
@@ -495,9 +536,9 @@ const AIPanel: React.FC<AIPanelProps> = ({
         {/* BOTTOM: AI Result Area (Diff View) - Only shown if Result exists */}
         {aiResultContent && diff && (
           <div className="flex-1 flex flex-col overflow-hidden bg-white border-t border-slate-200">
-            <div className="px-3 py-2 bg-blue-50 border-b border-blue-100 flex items-center justify-between">
+            <div className="px-3 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
               <div className="flex items-center gap-4">
-                <span className="text-xs font-semibold text-blue-700 uppercase tracking-wider">
+                <span className="text-xs font-semibold text-slate-700 uppercase tracking-wider">
                   Suggested Changes
                 </span>
                 <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -559,38 +600,63 @@ const AIPanel: React.FC<AIPanelProps> = ({
         )}
       </div>
 
-      {/* Chat History Popup */}
+      {/* Chat History Popup - Aligned with Panel */}
       {showHistory && (
-        <div className="absolute top-12 right-4 w-[800px] max-w-[90vw] max-h-[80%] bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col z-[60] overflow-hidden ring-1 ring-black/5">
-          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
+        <div className="absolute top-12 left-4 right-4 bottom-4 bg-white rounded-xl shadow-2xl border border-slate-200 flex flex-col z-[60] overflow-hidden ring-1 ring-black/5">
+          <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex items-center justify-between flex-shrink-0">
             <h4 className="font-semibold text-slate-700 flex items-center gap-2">
               <History size={16} />
               Chat History
             </h4>
-            <button
-              onClick={() => setShowHistory(false)}
-              className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-200 transition-colors"
-            >
-              <X size={16} />
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setShowRawHistory(!showRawHistory)}
+                className={`p-1 rounded-md transition-colors ${showRawHistory ? 'bg-blue-100 text-blue-600' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-200'}`}
+                title="View Raw Context"
+              >
+                <Code size={16} />
+              </button>
+              <button
+                onClick={() => setShowHistory(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-md hover:bg-slate-200 transition-colors"
+              >
+                <X size={16} />
+              </button>
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
-            {chatHistory.length === 0 ? (
-              <p className="text-center text-slate-400 text-sm py-8">No history yet</p>
-            ) : (
-              chatHistory.map((msg) => (
-                <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                  <div className={`max-w-[90%] p-3 rounded-lg text-sm mb-1 ${msg.role === 'user' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-800'
-                    }`}>
-                    {msg.content}
+          {showRawHistory ? (
+            <div className="flex-1 overflow-auto p-4 bg-slate-900 text-slate-100 font-mono text-xs whitespace-pre-wrap">
+              {JSON.stringify({
+                system: projectPrompts?.system || "Default System Prompt",
+                messages: chatHistory
+              }, null, 2)}
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
+              {chatHistory.length === 0 ? (
+                <p className="text-center text-slate-400 text-sm py-8">No history yet</p>
+              ) : (
+                chatHistory.map((msg) => (
+                  <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+                    <div className={`max-w-[90%] p-3 rounded-lg text-sm mb-1 ${msg.role === 'user' ? 'bg-blue-100 text-blue-800' : 'bg-slate-100 text-slate-800'
+                      }`}>
+                      {msg.content}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] text-slate-400">
+                        {new Date(msg.timestamp).toLocaleTimeString()}
+                      </span>
+                      {msg.role === 'ai' && msg.model && (
+                        <span className="text-[10px] bg-slate-100 text-slate-500 px-1 rounded border border-slate-200">
+                          {msg.model}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <span className="text-[10px] text-slate-400">
-                    {msg.timestamp.toLocaleTimeString()}
-                  </span>
-                </div>
-              ))
-            )}
-          </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -610,3 +676,4 @@ const AIPanel: React.FC<AIPanelProps> = ({
 };
 
 export default AIPanel;
+

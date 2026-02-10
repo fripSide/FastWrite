@@ -1,192 +1,47 @@
 import type { TextItem, ViewMode } from '../types';
 
 /**
- * Helper to split text into atomic blocks (Headers, Environments) and Text Paragraphs.
- * This ensures that structures like tables and sections are never split into sentences.
+ * Parses content into a list of Paragraphs, extracting "Thoughts" metadata if present.
+ * Implements "Smart Chunking" to group LaTeX tags with text blocks.
+ * 
+ * Format:
+ * % [FW_THOUGHTS]
+ * % My thought content here...
+ * % [/FW_THOUGHTS]
+ * Actual paragraph text...
  */
-function parseAtomicBlocks(text: string): string[] {
-  const placeholders: string[] = [];
-  const placeholderPrefix = '___ATOM_BLOCK_';
-
-  // 1. Extract Environments (Tables, Figures, Equations, etc.)
-  // Note: We use a list of common block-level environments
-  const envRegex = /\\begin\{(table|figure|algorithm|code|tabular|equation|itemize|enumerate)\*?\}([\s\S]*?)\\end\{\1\*?\}/g;
-
-  let processed = text.replace(envRegex, (match) => {
-    placeholders.push(match);
-    return `${placeholderPrefix}${placeholders.length - 1}___`;
-  });
-
-  // 2. Extract Headers (Section, Subsection, etc.) - Line based
-  // Matches \section{...} at start of line (allowing whitespace)
-  const headerRegex = /^\s*\\(section|subsection|subsubsection|paragraph|subparagraph|chapter)\*?\{.*\}/gm;
-  processed = processed.replace(headerRegex, (match) => {
-    placeholders.push(match);
-    return `${placeholderPrefix}${placeholders.length - 1}___`;
-  });
-
-  // 3. Split by double newlines (Paragraphs)
-  // We trim each paragraph to avoid empty items
-  const rawParagraphs = processed.split(/\n[ \t]*\n+/).map(p => p.trim()).filter(p => p.length > 0);
-
-  // 4. For each paragraph:
-  //    - If it's a placeholder, return it (restored).
-  //    - If it's text, split into sentences.
-  const finalItems: string[] = [];
-
-  rawParagraphs.forEach((para, index) => {
-    // Check if the paragraph is EXACTLY a placeholder (Atomic Block)
-    // We trim again just in case
-    const match = para.trim().match(/^___ATOM_BLOCK_(\d+)___$/);
-    if (match) {
-      finalItems.push(placeholders[parseInt(match[1])]);
-    } else {
-      // It's a text paragraph. It might CONTAIN placeholders (e.g. inline math or smaller blocks if we missed regex)
-      // But mainly it's text. We split into sentences.
-
-      const sentences = splitTextIntoSentences(para);
-
-      // Restore placeholders in sentences
-      const restoredSentences = sentences.map(s => {
-        return s.replace(/___ATOM_BLOCK_(\d+)___/g, (_, index) => placeholders[parseInt(index)]);
-      });
-
-      finalItems.push(...restoredSentences);
-    }
-
-    // Insert paragraph separator (empty item) if not the last paragraph
-    if (index < rawParagraphs.length - 1) {
-      finalItems.push('');
-    }
-  });
-
-  return finalItems;
-}
-
-function splitTextIntoSentences(text: string): string[] {
-  // Simple sentence splitter that respects abbreviations could be complex.
-  // Using the previous punctuation regex: lookbehind[.!?] + whitespace + lookahead[A-Z]
-  return text
-    .split(/(?<=[.!?])\s+(?=[A-Z])/)
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
-}
-
-export function parseContent(content: string, mode: ViewMode): TextItem[] {
-  switch (mode) {
-    case 'section':
-      return parseSections(content);
-    case 'paragraph':
-      return parseParagraphs(content);
-    case 'sentence':
-      return parseSentences(content);
-    default:
-      return parseSections(content);
-  }
-}
-
-function parseSections(content: string): TextItem[] {
-  const items: TextItem[] = [];
-  const lines = content.split('\n');
-  let currentItem: TextItem | null = null;
-  let itemContent: string[] = [];
-  let lineNum = 0;
-  let itemIndex = 0;
-
-  for (const line of lines) {
-    lineNum++;
-    // Match either section or subsection
-    const sectionMatch = line.match(/\\(section|subsection)\{([^}]+)\}/);
-
-    if (sectionMatch) {
-      // Save previous item if exists
-      if (currentItem) {
-        currentItem.content = itemContent.join('\n');
-        items.push(currentItem);
-      }
-
-      // Start new item (treat both section and subsection as flat items)
-      itemIndex++;
-      const type = sectionMatch[1]; // 'section' or 'subsection'
-      // We can use the title from sectionMatch[2] if needed, but we store full content usually?
-      // Actually MainEditor mostly uses .content.
-
-      currentItem = {
-        id: `section-${itemIndex}`,
-        content: '', // content will be filled later, start with empty or the line?
-        // Usually we include the header line in the content so the user sees it?
-        // Yes, sectionContent = [line] in previous code.
-        type: 'section',
-        level: type === 'section' ? 1 : 2, // We can still track level field
-        children: [], // No children in flat mode
-        lineStart: lineNum,
-        status: 'unchanged'
-      };
-      itemContent = [line];
-    } else {
-      if (currentItem) {
-        itemContent.push(line);
-      } else {
-        // Content before first section?
-        // We can start a default item or ignore.
-        // Usually we create a default item if none exists.
-        // Let's defer "if (currentItem)" check or create one lazily?
-        // Better: create default item if content appears before any section.
-        if (line.trim() !== '') {
-          itemIndex++;
-          currentItem = {
-            id: `section-${itemIndex}`,
-            content: '',
-            type: 'section',
-            level: 1,
-            status: 'unchanged'
-          };
-          itemContent.push(line);
-        }
-      }
-    }
-  }
-
-  // Save last item
-  if (currentItem) {
-    currentItem.content = itemContent.join('\n');
-    items.push(currentItem);
-  }
-
-  // Fallback for no sections
-  if (items.length === 0) {
-    return [{
-      id: 'content-1',
-      content: content,
-      type: 'section',
-      level: 1,
-      status: 'unchanged'
-    }];
-  }
-
-  return items;
-}
-
-function parseParagraphs(content: string): TextItem[] {
+export function parseContent(content: string): TextItem[] {
   const lines = content.split('\n');
   const items: TextItem[] = [];
-  let currentPara: string[] = [];
-  let paraStartLine = 1;
-  let paraIndex = 0;
 
-  const flush = (nextStartLine: number) => {
-    if (currentPara.length > 0) {
-      paraIndex++;
+  let currentBlockLines: string[] = [];
+  let currentThoughts: string[] = [];
+  let isReadingThoughts = false;
+  let blockStartLine = 1;
+
+  // Helper to commit the current accumulated lines as a single TextItem
+  const commitBlock = (nextStartLine: number) => {
+    // Join lines. We want to preserve newlines between them to keep exact representation.
+    const blockContent = currentBlockLines.join('\n');
+
+    // Let's trim the *result* to avoid start/end whitespace issues in the editor card
+    const trimmedContent = blockContent.trim();
+
+    // Only push if we have actual content or thoughts
+    if (trimmedContent || currentThoughts.length > 0) {
       items.push({
-        id: `paragraph-${paraIndex}`,
-        content: currentPara.join('\n').trim(),
+        id: `para-${items.length + 1}`,
+        content: trimmedContent, // Use trimmed content for the editor value
         type: 'paragraph',
-        lineStart: paraStartLine,
+        thoughts: currentThoughts.length > 0 ? currentThoughts.join('\n').trim() : undefined,
+        lineStart: blockStartLine,
         status: 'unchanged'
       });
-      currentPara = [];
     }
-    paraStartLine = nextStartLine;
+
+    currentBlockLines = [];
+    currentThoughts = [];
+    blockStartLine = nextStartLine;
   };
 
   for (let i = 0; i < lines.length; i++) {
@@ -194,131 +49,177 @@ function parseParagraphs(content: string): TextItem[] {
     const lineNum = i + 1;
     const trimmed = line.trim();
 
+    // --- 1. Thoughts Parsing (High Priority) ---
+    if (trimmed === '% [FW_THOUGHTS]') {
+      // If we have pending content, we MUST commit it because thoughts strictly start a new logical unit
+      if (currentBlockLines.length > 0) {
+        commitBlock(lineNum);
+      }
+      isReadingThoughts = true;
+      blockStartLine = lineNum; // This thoughts block starts here
+      continue;
+    }
+
+    if (trimmed === '% [/FW_THOUGHTS]') {
+      isReadingThoughts = false;
+      continue;
+    }
+
+    if (isReadingThoughts) {
+      const cleanLine = line.replace(/^\s*%\s?/, '');
+      currentThoughts.push(cleanLine);
+      continue;
+    }
+
+    // --- 2. Content Grouping Logic ---
+
+    // We want to group structure commands with subsequent text if possible.
+    // Major structural breaks might still warrant a split if the previous block is substantial.
+
+    const isStructureCmd = /^\s*\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph)\*?\{/.test(line);
+    const isBeginEnv = /^\s*\\begin\{/.test(line);
+
+    // If we hit a start of a new structure/env...
+    if (isStructureCmd || isBeginEnv) {
+      // Evaluate if we should split from previous content.
+      // Heuristic: If previous content is "Substantial" (e.g. > 5 lines or has blank lines), split?
+      // Actually, user wants "Basic Blocks" > 5 lines.
+      // So we should try to KEEP accumulating unless we really need to split.
+
+      // But `\section` usually *starts* a concept. 
+      // If we have 20 lines of text, then `\section`, we probably want to split BEFORE the section.
+      // If we have 2 lines of text, then `\section`, maybe keep together? (Unlikely in valid LaTeX)
+
+      // Let's split BEFORE a structure command IF the current block has text content.
+      const hasContent = currentBlockLines.some(l => l.trim().length > 0);
+      if (hasContent) {
+        commitBlock(lineNum);
+        blockStartLine = lineNum;
+      }
+    }
+
+    // Append current line to buffer
+    // If it's the *start* of a new block (buffer empty), set start line
+    if (currentBlockLines.length === 0 && currentThoughts.length === 0) {
+      blockStartLine = lineNum;
+    }
+
+    currentBlockLines.push(line);
+
+    // --- 3. Post-Line Flush Check (The "Chunking" Magic) ---
+
+    // We want to split on BLANK LINES, but ONLY if the block is "Big Enough".
+    // If the block is small (e.g. just a header or 1-2 lines), we eat the blank line and continue.
+
     if (trimmed === '') {
-      // Empty line - flush current paragraph
-      flush(lineNum + 1);
-    } else {
-      // Check for implicit splitters: Sections or Block Environments
-      // If we see a section header, it should be its own block (or start a new one)
-      const isSection = /^\s*\\(section|subsection|subsubsection|chapter|paragraph|subparagraph)\*?\{/.test(line);
-      const isBeginEnv = /^\s*\\begin\{/.test(line);
-      const isEndEnv = /^\s*\\end\{/.test(line);
+      // Check validity of current block.
+      const textLines = currentBlockLines.filter(l => l.trim().length > 0);
 
-      // If we encounter a section or begin/end env, flush previous content first
-      // But only if currentPara is not empty.
-      // Exception: If currentPara is just started (length 0), we don't need to flush.
-      if ((isSection || isBeginEnv || isEndEnv) && currentPara.length > 0) {
-        flush(lineNum);
-      }
+      // If the block is largely just a header `\section{...}`, DO NOT flush yet.
+      const isHeaderOnly = textLines.every(l => /^\s*\\(part|chapter|section|subsection|subsubsection|label|begin|maketitle)/.test(l));
 
-      if (currentPara.length === 0) {
-        paraStartLine = lineNum;
-      }
-      currentPara.push(line);
+      if (!isHeaderOnly && currentBlockLines.length > 0) {
+        // It has real text.
+        // Heuristic: Split if > 5 lines of *content* (ignoring blanks)
+        const contentLineCount = textLines.length;
 
-      // If it's a section header, force flush immediately so it stands alone?
-      // Or if it's \end{...}, flush after?
-      // Let's keep sections distinct.
-      if (isSection) {
-        flush(lineNum + 1);
-      }
-      // For environments, we might want to keep the whole environment as one paragraph/block?
-      // But parseSentences has complex logic for that.
-      // parseParagraphs simple approach: split on \begin and \end boundaries.
-      // If we flush on \end, then the environment is grouped with preceding lines?
-      // No, we flushed BEFORE \begin. So inner content starts new para.
-      // If we flush AFTER \end, inner content is grouping until \end.
-
-      if (isEndEnv) {
-        flush(lineNum + 1);
+        if (contentLineCount >= 5) {
+          // Standard Paragraph Split
+          commitBlock(lineNum + 1);
+          // Next block starts on next line (skipping this blank one in terms of content, 
+          // but line numbers should track correctly. 
+          // commitBlock sets blockStartLine to `lineNum + 1`.
+        } else {
+          // Block is small (< 5 lines). 
+          // KEEP the blank line in the buffer?
+          // If we keep it, it becomes part of the content. 
+          // If we execute `commitBlock` later, `blockContent` will have the blank line.
+          // This is GOOD because it preserves spacing when we write back.
+        }
       }
     }
   }
 
-  // Save last paragraph
-  flush(0);
+  // Final flush
+  commitBlock(0);
+
+  // --- Post-Processing: Merge Small Blocks ---
+  // Users reported that some blocks are too short. 
+  // We merge small blocks (without thoughts) into the previous block to create larger editing units.
+
+  if (items.length > 0) {
+    const mergedItems: TextItem[] = [];
+
+    // Start with the first item
+    if (items.length > 0) mergedItems.push(items[0]);
+
+    for (let i = 1; i < items.length; i++) {
+      const current = items[i];
+      const prev = mergedItems[mergedItems.length - 1];
+
+      // Criteria for merging:
+      // 1. Current has NO thoughts (thoughts imply a distinct unit/task).
+      // 2. Current is "small" (e.g. < 3 lines of text).
+      // 3. Previous block exists (handled by loop start).
+      // 4. Ideally, we don't merge a Section Header *into* a previous text block? 
+      //    Actually, if the current block IS a section header, we probably want it separate?
+      //    Let's check if current is a structure command.
+
+      const isStructure = /^\s*\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph|begin|end)/.test(current.content);
+      const lineCount = current.content.split('\n').length;
+      const isSmall = lineCount < 3 && current.content.length < 300; // Heuristic
+
+      if (!current.thoughts && isSmall && !isStructure) {
+        // Merge into previous
+        // We add a blank line separator to preserve LaTeX structure
+        prev.content += '\n\n' + current.content;
+        // We don't update prev.id, but maybe we should update prev.lineEnd if we had it.
+        // prev.lineStart remains the same.
+      } else {
+        // Keep distinct
+        mergedItems.push(current);
+      }
+    }
+    return mergedItems;
+  }
 
   return items;
 }
 
-function parseSentences(content: string): TextItem[] {
-  const lines = content.split('\n');
+/**
+ * Splits a single paragraph's content into sentences for the "Focus Mode".
+ * This does NOT parse the whole document, just the text passed to it.
+ */
+export function parseParagraphToSentences(content: string, startLineOffset: number = 0): TextItem[] {
   const items: TextItem[] = [];
-  let sentenceIndex = 0;
 
-  // Block environments that should not be split (kept as single items)
-  const blockEnvs = ['table', 'figure', 'algorithm', 'tabular', 'equation', 'itemize', 'enumerate', 'align', 'lstlisting', 'verbatim', 'abstract'];
+  // Simple splitter - can be enhanced with the regex from before
+  // or a more robust NLP library if needed later.
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const lineNum = i + 1;
+  // We need to be careful about preserving lines if user formatted manually.
+  // But "Sentence Mode" implies re-flowing.
+  // Let's use the tokenizer we had:
 
-    if (line.trim() === '') {
-      continue; // Skip empty lines
-    }
+  // Regex to match sentence endings that aren't abbreviations (simplified)
+  // Split by [.!?] followed by whitespace and capital letter
+  const parts = content.split(/(?<=[.!?])\s+(?=[A-Z])/);
 
-    // Check if this is a section/subsection header - treat as single item
-    if (line.match(/^\s*\\(section|subsection|subsubsection|chapter|paragraph)\*?\{/)) {
-      sentenceIndex++;
+  let currentLine = startLineOffset;
+
+  parts.forEach((part, idx) => {
+    const trimmed = part.trim();
+    if (trimmed) {
       items.push({
-        id: `sentence-${sentenceIndex}`,
-        content: line.trim(),
+        id: `sent-${idx}`,
+        content: trimmed,
         type: 'sentence',
-        lineStart: lineNum,
+        lineStart: currentLine, // Approx line number, hard to be exact without sourcemaps
         status: 'unchanged'
       });
-      continue;
+      // Estimate line increment
+      currentLine += part.split('\n').length - 1;
     }
-
-    // Check if this is a block environment start (only specific ones, not document)
-    const envMatch = line.match(/^\s*\\begin\{(\w+)\*?\}/);
-    if (envMatch && blockEnvs.includes(envMatch[1])) {
-      const envName = envMatch[1];
-      let blockContent = line;
-      let blockStart = lineNum;
-      let depth = 1;
-      let j = i + 1;
-
-      while (j < lines.length && depth > 0) {
-        const checkLine = lines[j];
-        if (checkLine.includes(`\\begin{${envName}`)) depth++;
-        if (checkLine.includes(`\\end{${envName}`)) depth--;
-        blockContent += '\n' + checkLine;
-        j++;
-      }
-      i = j - 1; // Skip processed lines
-
-      sentenceIndex++;
-      items.push({
-        id: `sentence-${sentenceIndex}`,
-        content: blockContent.trim(),
-        type: 'sentence',
-        lineStart: blockStart,
-        status: 'unchanged'
-      });
-      continue;
-    }
-
-    // Regular text line - split by sentence-ending punctuation
-    const trimmedLine = line.trim();
-    if (trimmedLine.length > 0) {
-      const sentences = trimmedLine
-        .split(/(?<=[.!?])\s+(?=[A-Z])/)
-        .map(s => s.trim())
-        .filter(s => s.length > 0);
-
-      for (const sentence of sentences) {
-        sentenceIndex++;
-        items.push({
-          id: `sentence-${sentenceIndex}`,
-          content: sentence,
-          type: 'sentence',
-          lineStart: lineNum,
-          status: 'unchanged'
-        });
-      }
-    }
-  }
+  });
 
   return items;
 }

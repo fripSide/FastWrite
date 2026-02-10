@@ -17,15 +17,12 @@ interface SystemPromptModalProps {
 	onClose: () => void;
 }
 
-const MODE_LABELS: Record<AIMode, { label: string; icon: React.ReactNode; color: string }> = {
-	diagnose: { label: 'Diagnose', icon: <Search size={14} />, color: 'blue' },
-	refine: { label: 'Refine', icon: <Wand2 size={14} />, color: 'purple' },
-	quickfix: { label: 'QuickFix', icon: <Zap size={14} />, color: 'green' }
-};
+
 
 const SystemPromptModal: React.FC<SystemPromptModalProps> = ({ isOpen, projectId, onClose }) => {
 	const [prompts, setPrompts] = useState<ProjectPrompts | null>(null);
-	const [activeMode, setActiveMode] = useState<AIMode>('diagnose');
+	// Use 'system' as a special tab, plus the AIMode values
+	const [activeTab, setActiveTab] = useState<'system' | AIMode>('system');
 	const [isLoading, setIsLoading] = useState(false);
 	const [isSaving, setIsSaving] = useState(false);
 	const [saved, setSaved] = useState(false);
@@ -50,7 +47,7 @@ const SystemPromptModal: React.FC<SystemPromptModalProps> = ({ isOpen, projectId
 	const loadPrompts = async () => {
 		setIsLoading(true);
 		try {
-			const response = await fetch(`/api/prompts/${projectId}`);
+			const response = await fetch(`/api/prompts/${projectId}?t=${Date.now()}`);
 			if (response.ok) {
 				const data = await response.json();
 				setPrompts(data);
@@ -92,7 +89,7 @@ const SystemPromptModal: React.FC<SystemPromptModalProps> = ({ isOpen, projectId
 
 		setIsLoading(true);
 		try {
-			const response = await fetch(`/api/prompts/${projectId}/reset`, { method: 'POST' });
+			const response = await fetch(`/api/prompts/${projectId}/reset?t=${Date.now()}`, { method: 'POST' });
 			if (response.ok) {
 				const data = await response.json();
 				setPrompts(data.prompts);
@@ -119,97 +116,153 @@ const SystemPromptModal: React.FC<SystemPromptModalProps> = ({ isOpen, projectId
 
 	if (!isOpen) return null;
 
+	// Define all tabs including System
+	const TABS: { id: 'system' | AIMode; label: string; icon: React.ReactNode; color: string; description: string }[] = [
+		{
+			id: 'system',
+			label: 'System Prompt',
+			icon: <FileText size={14} />,
+			color: 'blue',
+			description: 'Default writing style and Personal settings.'
+		},
+		{
+			id: 'diagnose',
+			label: 'Diagnose',
+			icon: <Search size={14} />,
+			color: 'amber',
+			description: 'Check the whole paper and local context to verify content, logic flow, and argumentation structure.'
+		},
+		{
+			id: 'refine',
+			label: 'Refine',
+			icon: <Wand2 size={14} />,
+			color: 'purple',
+			description: 'Polish language, adjust structure, remove redundancy, and correct phrasing to improve quality.'
+		},
+		{
+			id: 'quickfix',
+			label: 'QuickFix',
+			icon: <Zap size={14} />,
+			color: 'green',
+			description: 'Check syntax and grammar errors only. Do not change meaning or sentence order.'
+		}
+	];
+
+	const activeTabConfig = TABS.find(t => t.id === activeTab)!;
+
 	return createPortal(
 		<div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[100]">
-			<div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[85vh] overflow-hidden flex flex-col">
-				{/* Header */}
-				<div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-amber-50 to-orange-50">
-					<div className="flex items-center justify-between">
-						<div className="flex items-center gap-3">
-							<div className="p-2 bg-amber-100 rounded-lg">
-								<FileText size={20} className="text-amber-600" />
+			<div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[85vh] overflow-hidden flex flex-col">
+				{/* Compact Header */}
+				<div className="px-6 py-3 border-b border-slate-200 bg-slate-50 flex flex-col gap-3">
+					<div className="flex items-start justify-between gap-4">
+						{/* Title & Description */}
+						<div className="flex-1 flex gap-3 min-w-0">
+							<div className={`p-2 rounded-lg shrink-0 mt-0.5 self-start ${activeTab === 'system' ? 'bg-blue-100 text-blue-600' :
+								activeTab === 'diagnose' ? 'bg-amber-100 text-amber-600' :
+									activeTab === 'refine' ? 'bg-purple-100 text-purple-600' :
+										'bg-green-100 text-green-600'
+								}`}>
+								{activeTabConfig.icon}
 							</div>
-							<div>
-								<h2 className="text-lg font-bold text-slate-800">AI Prompts</h2>
-								<p className="text-xs text-slate-500">Configure AI behavior for each mode</p>
+							<div className="min-w-0">
+								<h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+									{activeTabConfig.label}
+									<span className="text-sm font-normal text-slate-400">configuration</span>
+								</h2>
+								<p className="text-xs text-slate-500 mt-0.5 leading-relaxed truncate">
+									{activeTabConfig.description}
+								</p>
 							</div>
 						</div>
-						<button
-							onClick={onClose}
-							disabled={isSaving}
-							className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
-						>
-							<X size={20} className="text-slate-500" />
-						</button>
+
+						{/* Actions */}
+						<div className="flex items-center gap-3 shrink-0">
+							{/* Flow (Hidden on mobile) */}
+							<div className="hidden lg:flex items-center gap-2 text-[10px] text-slate-500 bg-white px-2 py-1.5 rounded border border-slate-200 shadow-sm">
+								<span className="font-bold text-slate-400">CONTEXT</span>
+								<div className="flex items-center gap-1.5">
+									<span className={`px-1.5 py-0.5 rounded border ${activeTab === 'system' ? 'bg-blue-50 border-blue-200 text-blue-700 font-medium' : 'bg-slate-50 border-slate-100 text-slate-500'}`}>
+										System
+									</span>
+									<span className="text-slate-300">+</span>
+									<span className={`px-1.5 py-0.5 rounded border ${activeTab !== 'system' ? 'bg-purple-50 border-purple-200 text-purple-700 font-medium' : 'bg-slate-50 border-slate-100 text-slate-500'}`}>
+										{activeTab === 'system' ? 'Mode' : activeTabConfig.label}
+									</span>
+									<span className="text-slate-300">+</span>
+									<span className="px-1.5 py-0.5 bg-slate-50 border-slate-100 text-slate-500 rounded border">
+										User
+									</span>
+								</div>
+							</div>
+
+							<button
+								onClick={onClose}
+								disabled={isSaving}
+								className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors disabled:opacity-50 text-slate-500"
+							>
+								<X size={20} />
+							</button>
+						</div>
 					</div>
 				</div>
 
-				{/* Runtime explanation */}
-				<div className="px-6 py-3 bg-blue-50 border-b border-blue-100">
-					<p className="text-xs text-blue-700">
-						<span className="font-semibold">Run with prompts:</span>
-						<span className="mx-1 px-1.5 py-0.5 bg-blue-100 rounded">System Prompt</span>
-						<span className="text-blue-400">+</span>
-						<span className="mx-1 px-1.5 py-0.5 bg-purple-100 rounded">{MODE_LABELS[activeMode].label} User Prompt</span>
-						<span className="text-blue-400">+</span>
-						<span className="mx-1 px-1.5 py-0.5 bg-green-100 rounded">Selected Text</span>
-					</p>
-				</div>
-
 				{/* Content */}
-				<div className="flex-1 p-6 overflow-auto">
+				<div className="flex-1 flex flex-col overflow-hidden">
 					{isLoading ? (
-						<div className="flex items-center justify-center py-12">
-							<Loader2 size={24} className="animate-spin text-blue-500" />
+						<div className="flex items-center justify-center h-full">
+							<Loader2 size={32} className="animate-spin text-blue-500" />
 						</div>
 					) : prompts ? (
-						<div className="space-y-5">
-							{/* Shared System Prompt */}
-							<div className="p-4 bg-blue-50 rounded-lg border border-blue-100">
-								<label className="block text-sm font-semibold text-blue-800 mb-2">
-									System Prompt
-									<span className="text-xs text-blue-500 ml-2 font-normal">(Shared across all modes)</span>
-								</label>
-								<textarea
-									value={prompts.system}
-									onChange={(e) => updateSystemPrompt(e.target.value)}
-									placeholder="Enter system prompt..."
-									className="w-full h-[120px] p-3 text-sm font-mono border border-blue-200 rounded-lg resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
-									disabled={isSaving}
-								/>
-							</div>
+						<div className="flex flex-col h-full">
+							{/* Tab Bar */}
+							<div className="px-6 pt-4 border-b border-slate-200 bg-slate-50/50 flex gap-2 overflow-x-auto">
+								{TABS.map(tab => {
+									const isActive = activeTab === tab.id;
+									// Dynamic color classes based on tab color
+									const activeClasses = {
+										blue: 'text-blue-700 border-blue-500 bg-blue-50',
+										amber: 'text-amber-700 border-amber-500 bg-amber-50',
+										purple: 'text-purple-700 border-purple-500 bg-purple-50',
+										green: 'text-green-700 border-green-500 bg-green-50'
+									}[tab.color] || 'text-slate-700 border-slate-500';
 
-							{/* Mode Tabs */}
-							<div>
-								<div className="flex gap-1 mb-3 border-b border-slate-200">
-									{(Object.entries(MODE_LABELS) as [AIMode, typeof MODE_LABELS[AIMode]][]).map(([mode, { label, icon }]) => (
+									return (
 										<button
-											key={mode}
-											onClick={() => setActiveMode(mode)}
-											className={`flex items-center gap-1.5 px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${activeMode === mode
-												? 'text-blue-600 border-blue-500 bg-blue-50'
-												: 'text-slate-500 border-transparent hover:text-slate-700 hover:bg-slate-50'
+											key={tab.id}
+											onClick={() => setActiveTab(tab.id)}
+											className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors whitespace-nowrap rounded-t-lg ${isActive
+												? activeClasses
+												: 'text-slate-500 border-transparent hover:text-slate-700 hover:bg-slate-100'
 												}`}
 										>
-											{icon}
-											{label}
+											{tab.icon}
+											{tab.label}
 										</button>
-									))}
-								</div>
+									);
+								})}
+							</div>
 
-								{/* Mode User Prompt */}
-								<div className="p-4 bg-purple-50 rounded-lg border border-purple-100">
-									<label className="block text-sm font-semibold text-purple-800 mb-2">
-										{MODE_LABELS[activeMode].label} User Prompt
-										<span className="text-xs text-purple-500 ml-2 font-normal">(Prepended to selected text)</span>
-									</label>
+							{/* Input Area - Takes remaining height */}
+							<div className="flex-1 p-6 bg-slate-50 overflow-hidden flex flex-col">
+								<div className="flex-1 flex flex-col relative">
 									<textarea
-										value={prompts[activeMode].user}
-										onChange={(e) => updateModePrompt(activeMode, e.target.value)}
-										placeholder={`Enter ${MODE_LABELS[activeMode].label.toLowerCase()} user prompt...`}
-										className="w-full h-[150px] p-3 text-sm font-mono border border-purple-200 rounded-lg resize-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+										value={activeTab === 'system' ? prompts.system : prompts[activeTab].user}
+										onChange={(e) => activeTab === 'system'
+											? updateSystemPrompt(e.target.value)
+											: updateModePrompt(activeTab as AIMode, e.target.value)
+										}
+										placeholder={`Enter ${activeTab === 'system' ? 'System' : activeTabConfig.label} prompt...`}
+										className="w-full h-full p-6 text-sm font-mono border border-slate-200 rounded-xl resize-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white shadow-sm leading-relaxed"
 										disabled={isSaving}
+										spellCheck={false}
 									/>
+									{/* Context Helper Text */}
+									<div className="mt-2 text-xs text-slate-400 flex justify-end px-1">
+										<span className="font-mono">
+											{activeTab === 'system' ? prompts.system.length : prompts[activeTab as AIMode].user.length} characters
+										</span>
+									</div>
 								</div>
 							</div>
 						</div>
@@ -221,7 +274,7 @@ const SystemPromptModal: React.FC<SystemPromptModalProps> = ({ isOpen, projectId
 				</div>
 
 				{/* Footer */}
-				<div className="px-6 py-4 border-t border-slate-200 bg-slate-50 flex justify-between">
+				<div className="px-6 py-4 border-t border-slate-200 bg-white flex justify-between items-center z-10">
 					<button
 						onClick={handleReset}
 						disabled={isSaving || isLoading}
@@ -241,7 +294,7 @@ const SystemPromptModal: React.FC<SystemPromptModalProps> = ({ isOpen, projectId
 						<button
 							onClick={handleSave}
 							disabled={isSaving || isLoading || !prompts}
-							className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium flex items-center gap-2"
+							className="px-5 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-medium flex items-center gap-2 shadow-md hover:shadow-lg translate-y-0 hover:-translate-y-0.5 active:translate-y-0 transform duration-150"
 						>
 							{saved ? (
 								<>

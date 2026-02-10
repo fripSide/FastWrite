@@ -1,0 +1,18 @@
+{
+  "/Users/fripside/Work/Dev/VibeDev/FastWrite/demo/latex-p2/main.tex:refine": [
+    {
+      "id": "1770468722165",
+      "role": "user",
+      "content": "Please refine the following text. Improve clarity, structure, eliminate redundancy, and enhance academic writing quality. Return only the refined text.",
+      "timestamp": "2026-02-07T12:52:02.165Z"
+    }
+  ],
+  "/Users/fripside/Work/Dev/VibeDev/FastWrite/demo/latex-p2/main.tex:quickfix": [
+    {
+      "id": "1770468727250",
+      "role": "user",
+      "content": "Please fix any grammar, spelling, punctuation, or syntax errors in the following text. Do not change the meaning or structure. Return only the corrected text.",
+      "timestamp": "2026-02-07T12:52:07.250Z"
+    }
+  ]
+}

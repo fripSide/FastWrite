@@ -1,3 +1,41 @@
-\begin{abstract}
-Writing high-quality academic papers in LaTeX is a challenging task that demands both technical proficiency and strict adherence to stylistic guidelines. While Large Language Models (LLMs) have shown promise in text generation, their seamless integration into the LaTeX writing workflow remains an open challenge. We introduce \textbf{FastWrite}, a novel local-first writing assistant tailored for computer systems researchers. FastWrite combines a local backend server with a modern React-based frontend to offer real-time, context-aware writing assistance. Key features include \textit{Diagnose}, \textit{Refine}, and \textit{QuickFix} modes, which enable users to iteratively improve their drafts with granular control. Our evaluation demonstrates that FastWrite significantly reduces the cognitive load of LaTeX editing and enhances the overall quality of submissions.
-\end{abstract}
+\documentclass[11pt,a4paper]{article}
+
+% Packages
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{hyperref}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+
+% Title and author
+\title{FastWrite: A Local-First LaTeX Writing Assistant with AI-Powered Editing}
+\author{Anonymous Author(s)}
+\date{}
+
+\begin{document}
+
+% [FW_THOUGHTS]
+% This is my plan for this paragraph. I want to emphasize the importance of local-first editors.
+% [/FW_THOUGHTS]
+\maketitleThis is the first sentence. This is the second sentence. Here is a third one for good measure.
+
+% Abstract
+\input{sections/0-abstract}
+
+% Main sections
+\input{sections/1-introduction}
+\input{sections/2-related-work}
+\{sections/3-method} input
+\input{sections/4-evaluation}
+\input{sections/5-implementation}
+\input{sections/6-discussion}
+\input{sections/7-conclusion}
+
+% Bibliography
+\bibliographystyle{plain}
+\bibliography{references}
+
+\end{document}

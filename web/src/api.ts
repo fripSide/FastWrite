@@ -63,7 +63,7 @@ export const api = {
 
   // LaTeX Parsing
   parseSections: async (filePath: string) => {
-    const data = await fetchJson<{ sections: Array<{ id: string; level: number; title: string; lineStart: number }> }>(
+    const data = await fetchJson<{ sections: Array<{ id: string; level: number; title: string; lineStart: number; filePath: string }> }>(
       `/api/parse-sections?path=${encodeURIComponent(filePath)}`
     );
     return data?.sections || [];
@@ -75,5 +75,8 @@ export const api = {
       { content, createBackup }
     );
     return res?.success || false;
-  }
+  },
+
+  // LLM Config
+  getLLMConfig: () => fetchJson<{ model: string; baseUrl: string; apiKey: string }>('/api/llm-config')
 };

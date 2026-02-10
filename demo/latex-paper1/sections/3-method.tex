@@ -13,7 +13,10 @@ As shown in Figure \ref{fig:arch}, the system consists of a React-based frontend
 
 \subsection{Key Components}
 \subsubsection{The Frontend}
-The editor provides a split-view interface: the left panel handles file navigation, while the main area supports distraction-free editing. The AI panel can be toggled to fullscreen for focused refinement sessions.
+The editor provides a split-view interface: the left panel handles file navigation, while the main area supports distraction-free editing.
+The AI panel can be toggled to fullscreen for focused refinement sessions.
 
 \subsubsection{Local Backend}
-We utilize Bun.js for high-performance file I/O. The backend monitors the file system for external changes (e.g., git pulls) and broadcasts updates to the frontend via WebSockets.
+We utilize Bun.js for high-performance file I/O.
+
+The backend monitors the file system for external changes (e.g., git pulls) and broadcasts updates to the frontend via WebSockets.

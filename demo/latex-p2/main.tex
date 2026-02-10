@@ -1,7 +1,6 @@
 \documentclass[11pt,twocolumn]{article}
 \usepackage[utf8]{inputenc}
 \usepackage{amsmath,amssymb,amsfonts}
-\usepackage{table}
 \usepackage{graphicx}
 \usepackage{hyperref}
 \usepackage[margin=0.75in]{geometry}
@@ -13,7 +12,7 @@
 
 % Title Configuration
 \title{Efficient Algorithms for Large-Scale Data Processing: A Comprehensive Study and Performance Analysis on Distributed Systems}
-\author{Research Team\\
+\author{Research Team\\ - Typing test!
 Department of Computer Science\\
 University of Technology}
 \date{\today}
@@ -23,158 +22,181 @@ University of Technology}
 
 \begin{abstract}
 This paper presents novel algorithms for processing large-scale datasets efficiently in distributed computing environments.
-% The abstract serves as a summary of the entire paper.
-% We highlight the main contributions: framework, partitioning, and results.
-We introduce a distributed processing framework that achieves near-linear speedup across multiple processing nodes.
+As data volumes continue to grow exponentially, traditional processing paradigms face significant bottlenecks in I/O throughput and network latency.
+We introduce a distributed processing framework that achieves near-linear speedup across multiple processing nodes by leveraging data locality and minimizing cross-node communication.
 Our approach combines advanced indexing techniques with parallel processing strategies to minimize I/O overhead and network communication costs.
-% Experimental results are crucial here.
-Experimental results demonstrate a 10x improvement over existing methods on datasets exceeding 1TB in size.
-We also provide theoretical analysis of our algorithms, proving their correctness and analyzing their time and space complexity.
-The framework has been deployed in production environments, processing over 100 petabytes of data daily across thousands of nodes.
+Specifically, we propose a locality-aware partitioning scheme that reduces shuffling by 40\% compared to random partitioning.
+Experimental results demonstrate a 10x improvement over existing methods on datasets exceeding 1TB in size, with particularly strong gains in join-heavy workloads.
+We also provide theoretical analysis of our algorithms, proving their correctness and analyzing their time and space complexity under various network topologies.
+The framework has been deployed in production environments, processing over 100 petabytes of data daily across thousands of nodes with high availability.
 \end{abstract}
 
 \section{Introduction}
-% Start with the problem statement.
 The exponential growth of data in modern applications poses significant challenges for traditional processing methods.
-Social media platforms generate petabytes of data daily, scientific instruments produce terabytes of measurements, and IoT devices continuously stream sensor readings.
-% Why is this hard?
+In the era of Big Data, organizations are collecting vast amounts of information from diverse sources, ranging from user interactions on web platforms to sensor readings from industrial machinery.
+Social media platforms generate petabytes of data daily, capturing everything from text posts to high-definition video uploads.
+Scientific instruments, such as particle accelerators and genomic sequencers, produce terabytes of measurements in a single run, requiring immediate processing to identify significant events.
+IoT devices continuously stream sensor readings, creating a relentless torrent of time-series data that must be aggregated and analyzed in real-time.
+
 The velocity, volume, and variety of this data have created unprecedented demands on computing infrastructure.
-Traditional single-machine approaches cannot keep pace with these demands.
-Even the most powerful servers with terabytes of RAM and dozens of CPU cores cannot handle the scale of modern data processing requirements.
+Data centers have evolved from simple clusters of commodity hardware to sophisticated networks of specialized accelerators, including GPUs and TPUs.
+However, software frameworks have struggled to keep pace with these hardware advancements.
+Traditional single-machine approaches cannot keep pace with these demands; the physical limits of a single server—memory bandwidth, disk I/O, and CPU core count—are quickly reached when dealing with datasets in the petabyte range.
+Even the most powerful servers with terabytes of RAM and dozens of CPU cores cannot handle the scale of modern data processing requirements without prohibitive latency.
 
-% This is a very long paragraph to test the editor's paragraph splitting capability.
-% We want to ensure that the editor can handle large blocks of text without breaking the UI or making it difficult to navigate.
-% The goal is to verify that implicit paragraph breaks are detected correctly.
-% If the parser works correctly, this block should be treated as a single paragraph item in the editor.
-% However, if we insert a blank line below, it should split. 
-To address these limitations, we propose a new distributed architecture.
+To address these limitations, we propose a new distributed architecture designed for extreme scale and resilience.
 This architecture is designed from the ground up to handle failure as a first-class citizen.
-In large clusters, node failures are not anomalies; they are expected events.
-Therefore, our system employs a novel checkpointing mechanism that minimizes the cost of recovery.
-Instead of restarting the entire job, we can resume from the last consistent state.
-This feature is particularly important for long-running batch jobs that may take hours or days to complete.
+In clusters with thousands of nodes, hardware failures are not anomalies; they are statistical certainties.
+Therefore, our system employs a novel checkpointing mechanism that minimizes the cost of recovery by logging fine-grained state changes to a distributed ledger.
+Instead of restarting the entire job upon a node failure, our system can chirurgically effectively repair the lost partition by re-computing only the missing data dependencies.
+This feature is particularly important for long-running batch jobs that may take hours or days to complete, where a complete restart would be financially and temporally unacceptable.
 
-% Here is a list of contributions.
 This paper addresses this challenge by proposing a novel distributed algorithm that:
+
 \begin{itemize}
-    \item Scales linearly with the number of processing nodes
-    \item Minimizes network communication overhead through intelligent data partitioning
-    \item Handles node failures gracefully using checkpoint-based recovery
-    \item Supports both batch and streaming workloads with unified abstractions
+    \item Scales linearly with the number of processing nodes, demonstrating high parallel efficiency even at 10,000+ cores.
+    \item Minimizes network communication overhead through intelligent data partitioning that respects domain-specific locality constraints.
+    \item Handles node failures gracefully using checkpoint-based recovery, ensuring zero data loss and minimal re-computation.
+    \item Supports both batch and streaming workloads with unified abstractions, allowing developers to write logic once and deploy it anywhere.
+    \item Integrates seamlessly with existing data ecosystems, including HDFS, S3, and common columnar formats like Parquet and ORC.
 \end{itemize}
 
 The contributions of this paper are as follows:
+
 \begin{enumerate}
-    \item We present a new distributed processing framework that achieves near-linear scalability
-    \item We introduce novel data partitioning strategies that minimize network transfer
-    \item We provide theoretical analysis proving the correctness and efficiency of our approach
-    \item We demonstrate the effectiveness of our system through extensive experiments
+    \item We present a new distributed processing framework that achieves near-linear scalability through a novel work-stealing scheduler.
+    \item We introduce novel data partitioning strategies that minimize network transfer by exploiting graph-based clustering of data dependencies.
+    \item We provide theoretical analysis proving the correctness and efficiency of our approach, establishing upper bounds on communication complexity.
+    \item We demonstrate the effectiveness of our system through extensive experiments on real-world datasets, outperforming state-of-the-art systems by significant margins.
 \end{enumerate}
 
-% Outline of the paper structure.
 The rest of this paper is organized as follows.
 Section 2 discusses related work in distributed computing and data processing.
 Section 3 presents the architecture of our system.
 Section 4 describes our core algorithms in detail.
 Section 5 provides theoretical analysis.
 Section 6 presents experimental results.
-Section 7 discusses practical considerations and lessons learned.
-Section 8 concludes the paper.
+Section 7 discusses practical considerations and lessons learned from production deployment.
+Section 8 concludes the paper and outlines future research directions.
 
 \section{Related Work}
-% This section reviews existing literature.
-% We compare with MapReduce, Spark, and Flink.
+This section reviews existing literature in the field of large-scale data processing, highlighting the evolution from early batch systems to modern streaming and hybrid architectures.
 
 \subsection{MapReduce and Hadoop}
-MapReduce~\cite{dean2008} revolutionized large-scale data processing by introducing a simple programming model.
-The model consists of two phases: a map phase that processes input key-value pairs in parallel, and a reduce phase that aggregates results.
-% Historical context is important.
-Hadoop, the open-source implementation of MapReduce, became the de facto standard for batch processing.
-However, MapReduce has several limitations.
-% Detailed critique of MapReduce limitations.
-The disk-based intermediate storage between map and reduce phases creates significant I/O overhead.
-The two-phase programming model is restrictive for complex analytical queries.
-Iterative algorithms require multiple MapReduce jobs, each with full disk I/O.
-This significantly slows down graph processing and machine learning algorithms that require many iterations.
+MapReduce~\cite{dean2008} revolutionized large-scale data processing by introducing a simple, fault-tolerant programming model based on functional programming primitives.
+The model consists of two phases: a map phase that processes input key-value pairs in parallel to generate intermediate pairs, and a reduce phase that aggregates these results by key.
+Hadoop, the open-source implementation of MapReduce, became the de facto standard for batch processing in the late 2000s, enabling companies to process web-scale data on commodity hardware.
+However, MapReduce has several inherent limitations that hinder its performance on modern workloads.
+The disk-based intermediate storage between map and reduce phases creates significant I/O overhead, as every intermediate result must be materialized to HDFS.
+The two-phase programming model is restrictive for complex analytical queries, forcing developers to chain multiple jobs together manually.
+Iterative algorithms, common in machine learning (e.g., K-Means, Logistic Regression) and graph processing (e.g., PageRank), require multiple MapReduce jobs. Each iteration involves full disk I/O, reading input from disk and writing output back, which introduces massive latency penalties.
 
 \subsection{Apache Spark}
-Spark~\cite{zaharia2016} improved upon MapReduce with in-memory processing and Resilient Distributed Datasets (RDDs).
-RDDs provide fault tolerance through lineage tracking rather than replication.
-The in-memory caching capability makes Spark significantly faster for iterative workloads.
-% However, Spark has issues at extreme scale.
-Despite its improvements, Spark still faces challenges with large-scale data.
-Memory pressure can lead to spilling and performance degradation.
-The bulk synchronous parallel model can create stragglers that slow down entire jobs.
-Garbage collection pauses in Java Virtual Machine (JVM) can also affect latency.
+Spark~\cite{zaharia2016} improved upon MapReduce with in-memory processing and the concept of Resilient Distributed Datasets (RDDs).
+RDDs provide fault tolerance through lineage tracking—logging the transformations applied to data—rather than physical replication of data blocks.
+This allows Spark to recompute lost data partitions from their ancestors, significantly reducing storage overhead.
+The in-memory caching capability makes Spark significantly faster for iterative workloads, often by orders of magnitude compared to Hadoop.
+Despite its improvements, Spark still faces challenges with large-scale data particularly when the working set exceeds aggregate cluster memory.
+Memory pressure can lead to "spilling" to disk, which degrades performance back to disk-based speeds.
+The bulk synchronous parallel (BSP) model used by Spark can create stragglers that slow down entire jobs; the barrier synchronization step waits for the slowest task to complete.
+Garbage collection (GC) pauses in the Java Virtual Machine (JVM) can also affect latency unpredictably, causing "stop-the-world" events that disrupt distributed coordination.
 
 \subsection{Stream Processing Systems}
-Stream processing systems like Apache Flink and Apache Kafka Streams handle continuous data flows.
-These systems process events as they arrive, providing low-latency results.
-Flink's exactly-once semantics guarantee correct results even under failures.
-However, stream processing systems are designed for continuous queries and may not be optimal for batch analytics.
-Hybrid systems that unify batch and stream processing remain an active research area.
+Stream processing systems like Apache Flink and Apache Kafka Streams handle continuous data flows, marking a shift from batch to real-time analytics.
+These systems process events as they arrive, providing low-latency results often in the sub-second range.
+Flink's checkpointing mechanism, based on Chandy-Lamport snapshots, guarantees exactly-once semantics even under failures, ensuring that every event is processed exactly once in the final result.
+However, stream processing systems are primarily designed for continuous queries and windowed aggregations.
+They may not be optimal for large-scale historical batch analytics due to the overhead of maintaining state for unbounded streams.
+Hybrid systems that unify batch and stream processing remain an active research area; usually, systems are optimized for one and adapt to the other with compromises.
+
+\subsection{Database Systems and Newer Frameworks}
+Traditional database systems have also evolved to handle big data.
+Column-oriented databases like Vertica and ClickHouse optimize analytical queries by storing data column-wise, which drastically reduces I/O for aggregation queries accessing few columns.
+Distributed databases like CockroachDB and TiDB provide horizontal scalability while maintaining ACID properties, bridging the gap between OLTP and OLAP (HTAP).
+Recently, newer frameworks like Ray and Dask have emerged, targeting Python-native workloads and ML scaling.
+Ray provides a flexible actor-based model that excels at distributed reinforcement learning, while Dask integrates deeply with the PyData ecosystem (Pandas, NumPy).
+Our work builds on these foundations while addressing their limitations in handling complex analytical queries at petabyte scale with a specific focus on network-aware optimization.
 
 \section{System Architecture}
-% Overview of our system components.
-Our system consists of three main components that work together to process large-scale data efficiently.
+Our system consists of three main components that work together to process large-scale data efficiently: the Data Partitioner, the Execution Engine, and the Result Aggregator.
+This modular design allows each component to be scaled and optimized independently.
 
 \subsection{Data Partitioner}
-The partitioner divides input data into balanced chunks using consistent hashing.
-This ensures uniform distribution even when nodes join or leave the cluster.
-The partitioning scheme considers data locality to minimize network transfers.
+The partitioner is responsible for the initial distribution of data across the cluster.
+It divides input data into balanced chunks using consistent hashing to minimize data movement during cluster resizing.
+This ensures uniform distribution even when nodes join or leave the cluster, avoiding "hot spots" where one node is overwhelmed with data.
+The partitioning scheme considers data locality to minimize network transfers, preferring to schedule computation on the node where data resides.
 
-% Detailed explanation of Consistent Hashing.
 \subsubsection{Consistent Hashing}
-We use a virtual node approach where each physical node is mapped to multiple points on the hash ring.
-This provides better load balancing and smoother rebalancing when nodes are added or removed.
-The hash function distributes keys uniformly across the ring.
-% Random comment: verify if MD5 or SHA1 is used. Suggested CityHash for performance.
-We employ CityHash due to its superior performance characteristics on modern CPUs.
+We use a virtual node approach where each physical node is mapped to multiple points on the hash ring (tokens).
+This provides better load balancing and smoother rebalancing when nodes are added or removed; random variations in load are smoothed out across the multiple virtual nodes.
+The hash function distributes keys uniformly across the ring, minimizing collisions.
+We employ CityHash or MurmurHash3 due to their superior performance characteristics on modern CPUs, hashing millions of keys per second per core.
 
 \subsubsection{Locality-Aware Partitioning}
-When data exhibits spatial or temporal locality, we co-locate related data on the same nodes.
-This reduces network transfers during join operations and aggregations.
-The partitioner analyzes query patterns to optimize data placement.
-% Example: co-locating user data with their click logs.
-For example, in a join between Users and Clicks, we partition both tables by UserID so that the join can happen locally without shuffling data across the network.
+When data exhibits spatial (e.g., geospatial coordinates) or temporal (e.g., time-series) locality, we co-locate related data on the same nodes.
+This reduces network transfers during join operations and aggregations, which are typically the most network-intensive phases.
+The partitioner analyzes query patterns and historical execution logs to optimize data placement.
+For example, in a join between Users and Clicks, we partition both tables by UserID so that the join can happen locally without shuffling data across the network (shuffle-less join).
 
 \subsection{Execution Engine}
-The execution engine processes partitions in parallel using a task-based scheduler.
+The execution engine processes partitions in parallel using a task-based scheduler inspired by modern work-stealing runtimes (like Cilk or Go's scheduler).
 Each task operates on a subset of data and produces intermediate results.
-The scheduler assigns tasks to nodes based on data locality and resource availability.
+The scheduler assigns tasks to nodes based on data locality (soft affinity) and resource availability (hard constraints on RAM/CPU).
 
 \subsubsection{Task Scheduling}
-Tasks are scheduled using a work-stealing algorithm that balances load dynamically.
-When a node finishes its assigned tasks, it steals work from busy nodes.
-This approach handles stragglers effectively and maximizes resource utilization.
+Tasks are scheduled using a decentralized work-stealing algorithm that balances load dynamically.
+Each worker maintains a local double-ended queue (deque) of tasks.
+When a node runs out of work in its local deque, it "steals" tasks from the back of another random node's deque.
+This approach handles stragglers effectively and maximizes resource utilization, as no core sits idle while work exists in the cluster.
+It also naturally handles heterogeneous clusters where some nodes may be faster than others.
 
 \subsubsection{Memory Management}
-The execution engine uses a custom memory allocator optimized for data processing.
-Large allocations use memory-mapped files for efficient I/O.
-Small allocations use object pools to reduce garbage collection overhead.
-% This is a critical optimization section. 
-% We found that the standard libc malloc was causing fragmentation.
-% Switching to jemalloc improved stability significantly.
+The execution engine uses a custom memory allocator optimized for data processing, bypassing the standard OS allocator for critical paths.
+Large allocations use memory-mapped files (mmap) for efficient I/O, allowing the OS to manage page caching transparently.
+Small allocations use thread-local object pools to reduce lock contention and garbage collection overhead.
+We strictly manage off-heap memory to avoid JVM GC pressure, storing columnar data in compact binary formats like Apache Arrow for zero-copy access.
+
+\subsection{Fault Tolerance and Monitoring}
+Reliability is achieved through a combination of periodic checkpointing and active health monitoring.
+
+\subsubsection{Heartbeat Mechanism}
+Nodes exchange heartbeat messages via a gossip protocol to maintain a membership list.
+If a node fails to report within a timeout (e.g., 30 seconds), it is marked as dead, and its tasks are rescheduled.
+The gossip protocol ensures that membership updates propagate logarithmically across the cluster.
+
+\subsubsection{Checkpointing}
+State is checkpointed asynchronously to a distributed file system (e.g., S3 or HDFS).
+Checkpoints are incremental; only state changed since the last checkpoint is written.
+This minimizes the "stop-the-world" impact of snapshotting.
 
 \section{Algorithm Description}
-This section describes our main processing algorithms in detail.
+This section describes our main processing algorithms in detail, focusing on the optimizations that enable high performance.
 
 \subsection{Parallel Scan}
-The parallel scan algorithm reads input data from distributed storage and applies filtering predicates.
-Each partition is scanned independently, and results are streamed to the next stage.
-% Algorithms should be distinct blocks in the editor.
+The parallel scan algorithm reads input data from distributed storage and applies filtering predicates as early as possible (predicate pushdown).
+Each partition is scanned independently, and results are streamed to the next stage using pipelined execution.
+By pushing filters down to the storage layer, we avoid reading and deserializing irrelevant data, saving significant I/O bandwidth.
+
 \begin{algorithm}
-\caption{Parallel Scan}\label{alg:scan}
+\caption{Parallel Scan with Predicate Pushdown}\label{alg:scan}
+
 \begin{algorithmic}[1]
 \Procedure{ParallelScan}{$D, predicate$}
     \State $partitions \gets \text{GetPartitions}(D)$
     \State $results \gets []$
     \ForAll{$p \in partitions$ \textbf{in parallel}}
-        \ForAll{$record \in p$}
-            \If{$predicate(record)$}
-                \State $results.append(record)$
+        \State $\text{InitializeReader}(p)$
+        \While{$\text{Reader.HasMore()}$}
+            \State $block \gets \text{Reader.NextBlock()}$
+            \If{$\text{BloomFilterMatch}(block, predicate)$}
+                \ForAll{$record \in block$}
+                    \If{$predicate(record)$}
+                        \State $results.append(record)$
+                    \EndIf
+                \EndFor
             \EndIf
-        \EndFor
+        \EndWhile
     \EndFor
     \State \Return $results$
 \EndProcedure
@@ -182,16 +204,20 @@ Each partition is scanned independently, and results are streamed to the next st
 \end{algorithm}
 
 \subsection{Distributed Hash Join}
-Our distributed hash join algorithm partitions both input relations by join key.
-Matching partitions are co-located on the same nodes for local join execution.
-% Comments about join optimization.
-% We use a bloom filter to filter out non-matching records early.
+Our distributed hash join algorithm partitions both input relations by join key, converting a global join into a set of independent local joins.
+Matching partitions are co-located on the same nodes.
+We use a bloom filter broadcasting step: before shuffling the larger table, we broadcast a bloom filter of the keys from the smaller table.
+Records in the larger table that do not match the bloom filter are discarded locally, significantly reducing shuffle traffic.
 
 \begin{algorithm}
-\caption{Distributed Hash Join}\label{alg:join}
+\caption{Distributed Hash Join with Bloom Filtering}\label{alg:join}
+
 \begin{algorithmic}[1]
 \Procedure{DistributedHashJoin}{$R, S, key$}
-    \State $R' \gets \text{Repartition}(R, key)$
+    \State $BF_S \gets \text{BuildBloomFilter}(S, key)$
+    \State $\text{Broadcast}(BF_S)$
+    \State $R_{filtered} \gets \text{Filter}(R, BF_S)$
+    \State $R' \gets \text{Repartition}(R_{filtered}, key)$
     \State $S' \gets \text{Repartition}(S, key)$
     \State $results \gets []$
     \ForAll{$(r_i, s_i) \in \text{zip}(R', S')$ \textbf{in parallel}}
@@ -208,28 +234,39 @@ Matching partitions are co-located on the same nodes for local join execution.
 \end{algorithmic}
 \end{algorithm}
 
+\subsection{Distributed Sort}
+Sorting is a fundamental primitive for many analytics tasks (e.g., window functions, median calculation).
+We implement a distributed range sort.
+First, we sample the data to estimate the distribution of keys.
+Using these samples, we determine split points (quantiles) that divide the range into $N$ roughly equal partitions.
+Data is then shuffled to these range partitions.
+Finally, each partition is sorted locally.
+Since the partitions are ordered by range (Partition 1 contains keys $A-C$, Partition 2 contains $D-F$, etc.), the concatenation of sorted partitions yields a globally sorted result.
+
 \section{Experimental Results}
 We evaluated our system on datasets ranging from 100GB to 10TB using a cluster of 100 nodes.
-Each node has 64 CPU cores, 256GB RAM, and 4TB NVMe SSD storage.
-Nodes are connected via 100Gbps Ethernet.
+Each node has 64 CPU cores (AMD EPYC), 256GB DDR4 RAM, and 4TB NVMe SSD storage.
+Nodes are connected via 100Gbps Ethernet leaf switches with a 400Gbps spine, providing non-blocking bisection bandwidth.
 
-\subsection{Scalability}
-Figure~\ref{fig:scaling} shows the speedup achieved as we increase the number of nodes.
+\subsection{Scalability Analysis}
+Figure~\ref{fig:scaling} shows the speedup achieved as we increase the number of nodes from 1 to 100.
 The system achieves near-linear speedup up to 64 nodes.
-Beyond 64 nodes, efficiency declines slightly due to communication overhead.
-The scalability results demonstrate that our algorithms effectively parallelize work.
-The work-stealing scheduler ensures balanced load distribution.
-The tree-based reduction minimizes the communication bottleneck.
+For instance, a job taking 64 minutes on 1 node takes approximately 1.1 minutes on 64 nodes.
+Beyond 64 nodes, efficiency declines slightly due to communication overhead and the diminishing returns of Amdahl's Law (the serial portion of coordination becomes dominant).
+Nevertheless, even at 100 nodes, we observe a 92x speedup compared to a single node.
+The scalability results demonstrate that our algorithms effectively parallelize work and that the overhead of our scheduler is minimal.
 
 \subsection{Comparison with Baselines}
-Table~\ref{tab:comparison} compares our approach with Spark and Flink on representative workloads.
-Our approach outperforms Spark by 2.3x on average and Flink by 1.8x on complex analytical queries.
+Table~\ref{tab:comparison} compares our approach with Apache Spark (v3.4) and Apache Flink (v1.17) on representative workloads (TPC-DS derived queries).
+Our approach outperforms Spark by 2.3x on average and Flink by 1.8x on complex analytical queries involving multiple joins.
 
 % Table definition
+
 \begin{table}[h]
 \centering
-\caption{Processing time comparison (seconds)}
+\caption{Processing time comparison (seconds) on TPC-DS Query 78}
 \label{tab:comparison}
+
 \begin{tabular}{|l|c|c|c|}
 \hline
 \textbf{Dataset} & \textbf{Ours} & \textbf{Spark} & \textbf{Flink} \\
@@ -243,17 +280,28 @@ Our approach outperforms Spark by 2.3x on average and Flink by 1.8x on complex a
 \end{tabular}
 \end{table}
 
+The primary factor for our performance advantage is the aggressive use of C++ native code for the execution engine, managing memory manually and avoiding JVM overheads.
+Wait, Spark generates Java bytecode. Flink also runs on JVM.
+Our system's custom memory allocator prevents fragmentation and ensures data locality in CPU caches.
+
+\subsection{Latency and Tail Latency}
+In addition to throughput, we analyzed the latency distribution.
+Our system exhibits a much tighter tail latency profile.
+The 99th percentile (p99) latency for point lookups is 15ms, compared to 120ms for Spark.
+This predictability is crucial for interactive applications where user experience depends on the slowest response.
+
 \section{Conclusion}
-We presented a distributed processing framework that achieves significant improvements over existing systems.
-Our approach combines novel partitioning strategies, efficient execution algorithms, and robust fault tolerance.
-Experimental results demonstrate 2-3x improvement over state-of-the-art systems.
-The framework has been deployed in production, processing petabytes of data daily.
-Future work includes extending the framework to support streaming workloads and integrating machine learning primitives.
-We believe our contributions advance the state of the art in large-scale data processing.
+We presented a novel distributed processing framework that achieves significant improvements over existing systems.
+By rethinking the stack from the ground up—from memory management to network-aware partitioning—we have created a system that is both faster and more robust.
+Our approach combines novel partitioning strategies, efficient execution algorithms (like bloom-filter-enhanced joins), and robust fault tolerance mechanisms.
+Experimental results demonstrate 2-3x improvement over state-of-the-art systems like Spark and Flink on typical analytical workloads.
+The framework has been deployed in production, processing petabytes of data daily and serving critical business needs.
+Future work includes extending the framework to support streaming workloads with sub-millisecond latency and integrating machine learning primitives directly into the execution graph.
+We believe our contributions advance the state of the art in large-scale data processing and pave the way for the next generation of big data systems.
 
 \section*{Acknowledgments}
-We thank the anonymous reviewers for their valuable feedback.
-This work was supported by grants from the National Science Foundation.
+We thank the anonymous reviewers for their valuable feedback which significantly improved the quality of this manuscript.
+This work was supported by grants from the National Science Foundation (Grant No. 123456) and generous cloud credits from CloudProviderX.
 
 \bibliographystyle{plain}
 \bibliography{references}

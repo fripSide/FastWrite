@@ -45,8 +45,11 @@ export interface SectionNode {
   id: string;
   level: number;
   title: string;
+  line: number;
   lineStart?: number;
+  filePath?: string;
   parentId?: string;
+  children?: SectionNode[];
 }
 
 // Editor Types
@@ -56,16 +59,13 @@ export type AIMode = 'diagnose' | 'refine' | 'quickfix';
 export interface TextItem {
   id: string;
   content: string;
-  type: ViewMode;
-  level?: number;
-  children?: TextItem[];
-  parentId?: string;
-  lineStart?: number;
-  originalContent?: string;
+  type: 'paragraph' | 'section' | 'sentence';
+  lineStart: number;
+  status: 'unchanged' | 'modified' | 'saved';
   modifiedContent?: string;
-  status: 'unchanged' | 'modified' | 'applied';
   aiMode?: AIMode;
   aiTimestamp?: string;
+  thoughts?: string;
 }
 
 // Diff Types
@@ -91,6 +91,7 @@ export interface DiffResult {
 export interface Backup {
   id: string;
   filename: string;
+  filePath?: string;
   timestamp: string;
   content: string;
 }
@@ -105,4 +106,13 @@ export interface LLMProvider {
   selectedModel: string;
   isActive: boolean;
   createdAt: number;
+}
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system' | 'ai';
+  content: string;
+  timestamp: Date;
+  model?: string;
+  suggestion?: string;
 }

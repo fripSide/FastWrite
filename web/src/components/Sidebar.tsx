@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Folder, FolderOpen, ChevronRight, ChevronDown, FileText, Plus, Trash2, Settings, RefreshCw } from 'lucide-react';
+import { Folder, FolderOpen, ChevronRight, ChevronDown, FileText, Plus, Trash2, Settings, RefreshCw, Check } from 'lucide-react';
 import type { Project, FileNode, SelectedProject, SectionNode } from '../types';
 import { api } from '../api';
 import SystemPromptModal from './SystemPromptModal';
@@ -11,6 +11,7 @@ interface SidebarProps {
   onImportClick: () => void;
   onFileSelect?: (file: FileNode) => void;
   onProjectDelete?: () => void;
+  onSectionClick?: (lineNumber: number, filePath?: string) => void;
 }
 
 const Sidebar: React.FC<SidebarProps> = ({
@@ -20,11 +21,16 @@ const Sidebar: React.FC<SidebarProps> = ({
   onImportClick,
   onFileSelect,
   onProjectDelete,
+  onSectionClick,
 }) => {
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
   const [sections, setSections] = useState<SectionNode[]>([]);
   const [files, setFiles] = useState<FileNode[]>([]);
   const [showSystemPromptModal, setShowSystemPromptModal] = useState(false);
+  const [collapsedSections, setCollapsedSections] = useState<Set<string>>(new Set());
+  const [isOutlineCollapsed, setIsOutlineCollapsed] = useState(false);
+  const [outlineHeight, setOutlineHeight] = useState(200);
+  const [isOutlineResizing, setIsOutlineResizing] = useState(false);
 
   // Sidebar Resize Logic
   const [sidebarWidth, setSidebarWidth] = useState(320);
@@ -59,6 +65,30 @@ const Sidebar: React.FC<SidebarProps> = ({
     };
   }, [resize, stopResizing]);
 
+  // Outline vertical resize handlers
+  const startOutlineResizing = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsOutlineResizing(true);
+  }, []);
+
+  useEffect(() => {
+    const handleOutlineResize = (e: MouseEvent) => {
+      if (isOutlineResizing && sidebarRef.current) {
+        const rect = sidebarRef.current.getBoundingClientRect();
+        const newHeight = rect.bottom - e.clientY;
+        setOutlineHeight(Math.max(100, Math.min(newHeight, rect.height - 150)));
+      }
+    };
+    const stopOutlineResizing = () => setIsOutlineResizing(false);
+
+    window.addEventListener('mousemove', handleOutlineResize);
+    window.addEventListener('mouseup', stopOutlineResizing);
+    return () => {
+      window.removeEventListener('mousemove', handleOutlineResize);
+      window.removeEventListener('mouseup', stopOutlineResizing);
+    };
+  }, [isOutlineResizing]);
+
   const refreshProjectFiles = useCallback(() => {
     if (selectedProject?.project) {
       fetch(`/api/projects/${selectedProject.project.id}/config`)
@@ -88,18 +118,69 @@ const Sidebar: React.FC<SidebarProps> = ({
 
   const parseLaTeXOutline = async (sectionsDir: string): Promise<void> => {
     try {
-      const candidates = ['main.tex', 'paper.tex', 'document.tex'];
+      let mainFile = 'main.tex';
+      // Check if there is a config for the current project
+      if (selectedProject?.project.id) {
+        const config = await api.getProjectConfig(selectedProject.project.id);
+        if (config?.mainFile) {
+          mainFile = config.mainFile;
+        }
+      }
+
+      // Prioritize mainFile, then candidates
+      const candidates = Array.from(new Set([mainFile, 'main.tex', 'paper.tex', 'document.tex']));
+      let foundSections: any[] = [];
+
       for (const f of candidates) {
         const filePath = `${sectionsDir}/${f}`;
         const sections = await api.parseSections(filePath);
         if (sections.length > 0) {
-          setSections(sections);
+          foundSections = sections;
           break;
         }
       }
+
+      if (foundSections.length > 0) {
+        setSections(buildSectionTree(foundSections));
+      } else {
+        setSections([]);
+      }
     } catch (error) {
       console.error('Failed to parse LaTeX outline:', error);
+      setSections([]);
     }
+  };
+
+  const buildSectionTree = (flatSections: any[]): SectionNode[] => {
+    const root: SectionNode[] = [];
+    const stack: { node: SectionNode; level: number }[] = [];
+
+    flatSections.forEach(section => {
+      const newNode: SectionNode = {
+        id: section.id,
+        title: section.title,
+        level: section.level,
+        line: section.lineStart || 0,
+        lineStart: section.lineStart,
+        filePath: section.filePath ? section.filePath.replace(/\/\.\//g, '/') : undefined,
+        children: []
+      };
+
+      // Find parent
+      while (stack.length > 0 && stack[stack.length - 1].level >= newNode.level) {
+        stack.pop();
+      }
+
+      if (stack.length === 0) {
+        root.push(newNode);
+      } else {
+        stack[stack.length - 1].node.children.push(newNode);
+      }
+
+      stack.push({ node: newNode, level: newNode.level });
+    });
+
+    return root;
   };
 
   const toggleFolder = (folderId: string): void => {
@@ -178,32 +259,81 @@ const Sidebar: React.FC<SidebarProps> = ({
     ));
   };
 
+  const [showProjectsDropdown, setShowProjectsDropdown] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setShowProjectsDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
   return (
     <>
       <div
         ref={sidebarRef}
         className="h-full w-full flex flex-col bg-slate-50 border-r border-slate-200 overflow-hidden"
       >
-        <div className="border-b border-slate-200 bg-white shadow-sm shrink-0 h-10 flex items-center">
+        <div className="border-b border-slate-200 bg-white shadow-sm shrink-0 h-10 flex items-center z-20 relative">
           <div className="flex items-center justify-between px-3 w-full">
-            <h2 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-              <FolderOpen size={16} className="text-blue-500" />
-              Papers
-            </h2>
-            <div className="flex gap-1">
+            <div className="relative flex-1 min-w-0" ref={dropdownRef}>
+              <button
+                onClick={() => setShowProjectsDropdown(!showProjectsDropdown)}
+                className="text-sm font-bold text-slate-800 flex items-center gap-2 hover:bg-slate-100 px-2 py-1 rounded-md transition-colors"
+              >
+                <FolderOpen size={16} className="text-blue-500" />
+                <span>Papers</span>
+                <ChevronDown size={14} className={`text-slate-400 transition-transform ${showProjectsDropdown ? 'rotate-180' : ''}`} />
+              </button>
+
+              {showProjectsDropdown && (
+                <div className="absolute top-full left-0 mt-1 w-64 bg-white rounded-lg shadow-xl border border-slate-200 py-1 z-30">
+                  <div className="max-h-64 overflow-y-auto">
+                    {projects.length > 0 ? (
+                      projects.map(p => (
+                        <button
+                          key={p.id}
+                          onClick={() => {
+                            onProjectSelect({ project: p, files: selectedProject?.files || [] });
+                            setShowProjectsDropdown(false);
+                          }}
+                          className={`w-full text-left px-4 py-2 text-sm hover:bg-blue-50 flex items-center gap-2 ${selectedProject?.project.id === p.id ? 'text-blue-600 bg-blue-50 font-medium' : 'text-slate-700'
+                            }`}
+                        >
+                          <FileText size={14} className={selectedProject?.project.id === p.id ? 'text-blue-500' : 'text-slate-400'} />
+                          <span className="truncate">{p.name}</span>
+                          {selectedProject?.project.id === p.id && <Check size={14} className="ml-auto text-blue-500" />}
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-4 py-3 text-xs text-slate-400 text-center">No papers found</div>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex gap-1 items-center shrink-0">
+
+
               <button
                 onClick={refreshProjectFiles}
-                className="p-1.5 text-slate-500 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
+                className="p-1.5 text-slate-500 hover:text-blue-500 hover:bg-blue-50 rounded-lg transition-colors shrink-0"
                 title="Refresh Files"
               >
                 <RefreshCw size={14} />
               </button>
               <button
                 onClick={onImportClick}
-                className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
-                title="Import Paper"
+                className="p-1.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors shrink-0"
+                title="Open Local Project"
               >
-                <Plus size={14} />
+                <FolderOpen size={14} />
               </button>
             </div>
           </div>
@@ -221,7 +351,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                       onClick={onImportClick}
                       className="mt-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
                     >
-                      Import Your First Paper
+                      Open Your First Project
                     </button>
                   </div>
                 </div>
@@ -230,7 +360,7 @@ const Sidebar: React.FC<SidebarProps> = ({
                   {projects.map(project => (
                     <div
                       key={project.id}
-                      onClick={() => onProjectSelect({ project, activeFileId: undefined })}
+                      onClick={() => onProjectSelect({ project, files: [] })}
                       className="rounded-lg border-2 border-slate-200 bg-white hover:border-blue-300 hover:bg-slate-50 transition-all cursor-pointer group relative"
                       title={project.localPath}
                     >
@@ -294,33 +424,112 @@ const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        {
-          sections.length > 0 && selectedProject && (
-            <div className="border-t border-slate-200 pt-2">
-              <h3 className="text-xs font-semibold text-slate-600 uppercase tracking-wider px-4 py-2 bg-slate-100">
-                Document Outline
-              </h3>
-              <div className="space-y-1">
-                {sections.map(section => (
-                  <div
-                    key={section.id}
-                    className="p-3 border-l-4 border-transparent"
-                  >
-                    <div className="flex items-start gap-3">
-                      <span className="text-sm font-medium text-slate-800">
-                        {section.level === 1 && <span className="ml-1">§</span>}
-                        {section.title}
-                      </span>
-                      <span className="text-xs text-slate-500 ml-auto">
-                        Line {section.lineStart}
-                      </span>
-                    </div>
-                  </div>
-                ))}
+        {/* Resizable Outline Panel - Always Visible */}
+        {selectedProject && (
+          <div style={{ height: isOutlineCollapsed ? 'auto' : outlineHeight }} className="flex flex-col border-t border-slate-200 bg-white">
+            {/* Drag Handle */}
+            {!isOutlineCollapsed && (
+              <div
+                className="h-1 bg-slate-100 hover:bg-blue-300 cursor-ns-resize flex items-center justify-center group"
+                onMouseDown={startOutlineResizing}
+              >
+                <div className="w-8 h-0.5 bg-slate-300 group-hover:bg-blue-400 rounded-full" />
               </div>
-            </div>
-          )
-        }
+            )}
+
+            {/* Collapsible Header */}
+            <button
+              onClick={() => setIsOutlineCollapsed(!isOutlineCollapsed)}
+              className="flex items-center gap-2 text-xs font-semibold text-slate-600 uppercase tracking-wider px-4 py-2 bg-slate-100 hover:bg-slate-200 transition-colors w-full text-left"
+            >
+              <ChevronDown
+                size={14}
+                className={`transition-transform ${isOutlineCollapsed ? '-rotate-90' : ''}`}
+              />
+              Document Outline
+            </button>
+
+            {/* Outline Content */}
+            {!isOutlineCollapsed && (
+              <div className="flex-1 overflow-y-auto py-1">
+                {sections.length > 0 ? (
+                  sections.map(section => {
+                    const hasChildren = section.children && section.children.length > 0;
+                    const isSectionCollapsed = collapsedSections.has(section.id);
+                    const toggleCollapse = () => {
+                      setCollapsedSections(prev => {
+                        const next = new Set(prev);
+                        if (next.has(section.id)) {
+                          next.delete(section.id);
+                        } else {
+                          next.add(section.id);
+                        }
+                        return next;
+                      });
+                    };
+
+                    return (
+                      <div key={section.id}>
+                        <div
+                          className={`flex items-center gap-1 px-3 py-1.5 hover:bg-slate-100 cursor-pointer ${hasChildren ? '' : 'pl-6'}`}
+                          onClick={() => {
+                            if (onSectionClick && section.lineStart) {
+                              onSectionClick(section.lineStart, section.filePath);
+                            }
+                          }}
+                        >
+                          {hasChildren && (
+                            <ChevronRight
+                              size={14}
+                              className={`text-slate-400 transition-transform flex-shrink-0 ${isSectionCollapsed ? '' : 'rotate-90'}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleCollapse();
+                              }}
+                            />
+                          )}
+                          <span className="text-sm text-slate-800 text-left flex-1">
+                            {section.level === 1 && <span className="font-medium">§</span>}
+                            {section.title}
+                          </span>
+                          <span className="text-xs text-slate-400 whitespace-nowrap flex-shrink-0">
+                            L{section.lineStart}
+                          </span>
+                        </div>
+                        {!isSectionCollapsed && hasChildren && (
+                          <div className="ml-4">
+                            {section.children!.map(child => (
+                              <div
+                                key={child.id}
+                                className="flex items-center gap-1 px-3 py-1 hover:bg-slate-50 cursor-pointer pl-5"
+                                onClick={() => {
+                                  if (onSectionClick && child.lineStart) {
+                                    onSectionClick(child.lineStart, child.filePath);
+                                  }
+                                }}
+                              >
+                                <span className="text-sm text-slate-600 text-left flex-1">
+                                  {child.title}
+                                </span>
+                                <span className="text-xs text-slate-400 whitespace-nowrap flex-shrink-0">
+                                  L{child.lineStart}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
+                ) : (
+                  <div className="px-4 py-3 text-xs text-slate-400 text-center">
+                    No outline available
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div >
 
       {/* System Prompt Modal */}

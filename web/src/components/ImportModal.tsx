@@ -200,7 +200,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
     <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[100]">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col">
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-          <h2 className="text-xl font-bold text-slate-800">Import LaTeX Paper Project</h2>
+          <h2 className="text-xl font-bold text-slate-800">Open Local LaTeX Project</h2>
           <button
             onClick={onClose}
             className="p-1 hover:bg-slate-100 rounded transition-colors"
@@ -299,7 +299,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                   </button>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  Select the LaTeX project directory using the system file browser
+                  Select the LaTeX project directory using the system file browser. Project will be opened in-place.
                 </p>
               </div>
 
@@ -431,10 +431,10 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                   {isImporting ? (
                     <>
                       <Loader2 size={16} className="animate-spin" />
-                      Importing...
+                      Opening...
                     </>
                   ) : (
-                    'Import All'
+                    'Open Project'
                   )}
                 </button>
               </div>
@@ -444,7 +444,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
           {stage === 'importing' && (
             <div className="text-center py-8">
               <Loader2 size={48} className="animate-spin text-blue-600 mx-auto mb-4" />
-              <p className="text-lg font-medium text-slate-700">Importing project...</p>
+              <p className="text-lg font-medium text-slate-700">Opening project...</p>
               <p className="text-sm text-slate-500 mt-2">Please wait while we set up your project</p>
             </div>
           )}

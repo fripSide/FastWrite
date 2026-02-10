@@ -32,6 +32,7 @@ import { forwardRef, useImperativeHandle } from 'react';
 
 export interface PDFViewerRef {
 	syncFromSelection: () => Promise<{ success: boolean; message?: string }>;
+	compile: () => Promise<void>;
 }
 
 const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTexPath, onSyncToSource, scrollTo }, ref) => {
@@ -181,8 +182,11 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 		setClickedLocation({ page: pageNumber, x: pdfX, y: pdfY });
 	};
 
-	// Expose sync functionality to parent
+	// Expose sync functionality and compile to parent
 	useImperativeHandle(ref, () => ({
+		compile: async () => {
+			await compile(); // Reuse existing compile function
+		},
 		syncFromSelection: async () => {
 			console.log('[PDFViewer] syncFromSelection called');
 			if (!onSyncToSource || !pdfUrl) {

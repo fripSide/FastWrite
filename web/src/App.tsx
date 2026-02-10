@@ -224,15 +224,21 @@ function App() {
 
   // Handle PDF-to-source sync - load file if needed, then scroll to line
   const handleSyncToSource = useCallback(async (filePath: string, line: number) => {
-    if (!selectedProject) return;
+    console.log('[handleSyncToSource] Called with:', { filePath, line });
+    if (!selectedProject) {
+      console.log('[handleSyncToSource] No selectedProject, aborting');
+      return;
+    }
 
     const normalizedPath = filePath.replace(/\/\.\//g, '/');
     const currentPath = selectedFile?.path || '';
+    console.log('[handleSyncToSource] Paths:', { normalizedPath, currentPath });
 
     // Check if we need to load a different file
     const isSameFile = currentPath === normalizedPath ||
       currentPath.endsWith(normalizedPath.split('/').pop() || '') ||
       normalizedPath.endsWith(currentPath.split('/').pop() || '');
+    console.log('[handleSyncToSource] isSameFile:', isSameFile);
 
     if (!isSameFile || !selectedFile) {
       // Need to load the file first
@@ -304,9 +310,13 @@ function App() {
             onImportClick={() => setIsImportModalOpen(true)}
             onFileSelect={handleFileSelect}
             onProjectDelete={loadProjects}
-            onSectionClick={(lineNumber) => {
-              setScrollToLine(lineNumber);
-              setTimeout(() => setScrollToLine(null), 100);
+            onSectionClick={(lineNumber, filePath) => {
+              if (filePath) {
+                handleSyncToSource(filePath, lineNumber);
+              } else {
+                setScrollToLine(lineNumber);
+                setTimeout(() => setScrollToLine(null), 100);
+              }
             }}
           />
         </div>

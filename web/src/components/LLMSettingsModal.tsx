@@ -25,6 +25,27 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 	const [editModels, setEditModels] = useState<string[]>([]);
 	const [editSelectedModel, setEditSelectedModel] = useState('');
 
+	const abortController = React.useRef<AbortController | null>(null);
+
+	useEffect(() => {
+		return () => {
+			if (abortController.current) {
+				abortController.current.abort();
+			}
+		};
+	}, []);
+
+	const handleCancel = () => {
+		if (abortController.current) {
+			abortController.current.abort();
+		}
+		if (isSaving) {
+			setIsSaving(false);
+			setStatus('idle');
+		}
+		onClose();
+	};
+
 	useEffect(() => {
 		if (isOpen) {
 			loadProviders();
@@ -51,9 +72,10 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 			if (response.ok) {
 				const data = await response.json();
 				setProviders(data);
-				// Select first provider by default
+				// Select active provider by default, or first one if none active
 				if (data.length > 0 && !selectedProvider) {
-					selectProvider(data[0]);
+					const active = data.find((p: LLMProvider) => p.isActive);
+					selectProvider(active || data[0]);
 				}
 			}
 		} catch (error) {
@@ -105,7 +127,10 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 	};
 
 	const handleFetchModels = async () => {
-		if (!editBaseUrl || !editApiKey) {
+		// Use edited key if provided, otherwise fall back to saved key
+		const effectiveKey = editApiKey || selectedProvider?.apiKey;
+
+		if (!editBaseUrl || !effectiveKey) {
 			setStatus('error');
 			setStatusMessage('API URL and Key are required to fetch models');
 			return;
@@ -117,7 +142,7 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 			const response = await fetch('/api/llm-providers/fetch-models', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ baseUrl: editBaseUrl, apiKey: editApiKey })
+				body: JSON.stringify({ baseUrl: editBaseUrl, apiKey: effectiveKey })
 			});
 			const data = await response.json();
 			if (data.models) {
@@ -152,6 +177,12 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 		setStatusMessage('Testing connection...');
 
 		try {
+			// Abort previous request if any
+			if (abortController.current) {
+				abortController.current.abort();
+			}
+			abortController.current = new AbortController();
+
 			// Test connection first
 			const testResponse = await fetch('/api/llm-config/test', {
 				method: 'POST',
@@ -159,8 +190,10 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 				body: JSON.stringify({
 					baseUrl: editBaseUrl,
 					apiKey: editApiKey || selectedProvider.apiKey,
-					model: editSelectedModel || 'gpt-4o'
-				})
+					model: editSelectedModel || 'gpt-4o',
+					providerId: selectedProvider.id
+				}),
+				signal: abortController.current.signal
 			});
 			const testData = await testResponse.json();
 
@@ -201,10 +234,19 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 				setStatusMessage('Failed to save');
 			}
 		} catch (error) {
-			setStatus('error');
-			setStatusMessage(error instanceof Error ? error.message : 'Save failed');
+			if (error instanceof Error && error.name === 'AbortError') {
+				setStatus('idle');
+				setStatusMessage('Cancelled');
+			} else {
+				setStatus('error');
+				setStatusMessage(error instanceof Error ? error.message : 'Save failed');
+			}
 		} finally {
+			if (abortController.current?.signal.aborted) {
+				// Keep keeping track of abort state if needed, but here we just reset saving
+			}
 			setIsSaving(false);
+			abortController.current = null;
 		}
 	};
 
@@ -308,9 +350,8 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 								</div>
 							</div>
 							<button
-								onClick={onClose}
-								disabled={isSaving}
-								className="p-2 hover:bg-slate-100 rounded-lg transition-colors disabled:opacity-50"
+								onClick={handleCancel}
+								className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
 							>
 								<X size={20} className="text-slate-500" />
 							</button>
@@ -460,9 +501,8 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 									</div>
 									<div className="flex items-center gap-3">
 										<button
-											onClick={onClose}
-											disabled={isSaving}
-											className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors text-sm font-medium disabled:opacity-50"
+											onClick={handleCancel}
+											className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded-lg transition-colors text-sm font-medium"
 										>
 											Cancel
 										</button>

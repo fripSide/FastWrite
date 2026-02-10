@@ -73,6 +73,7 @@ export function saveLLMConfig(config: Partial<LLMConfig>): boolean {
     };
 
     writeFileSync(LLM_CONFIG_FILE, JSON.stringify(newConfig, null, 2), 'utf-8');
+    console.log(`Synced LLM config to ${LLM_CONFIG_FILE}: model=${newConfig.model}`);
     return true;
   } catch (error) {
     console.error('Failed to save LLM config:', error);
@@ -102,6 +103,17 @@ function saveLLMProviders(providers: LLMProvider[]): boolean {
       mkdirSync(PROJS_DIR, { recursive: true });
     }
     writeFileSync(LLM_PROVIDERS_FILE, JSON.stringify(providers, null, 2), 'utf-8');
+
+    // Also sync the active provider to the legacy config file
+    const activeProvider = providers.find(p => p.isActive);
+    if (activeProvider) {
+      saveLLMConfig({
+        baseUrl: activeProvider.baseUrl,
+        apiKey: activeProvider.apiKey, // Note: This might save masked key if not careful, but source is unmasked from getLLMProviders
+        model: activeProvider.selectedModel
+      });
+    }
+
     return true;
   } catch (error) {
     console.error('Failed to save LLM providers:', error);
@@ -115,7 +127,22 @@ export function saveLLMProvider(provider: LLMProvider): boolean {
   const existingIndex = providers.findIndex(p => p.id === provider.id);
 
   if (existingIndex >= 0) {
-    providers[existingIndex] = provider;
+    // Check if API key is masked and restore original if so
+    const existing = providers[existingIndex];
+    if (existing && provider.apiKey && provider.apiKey.includes('...') && existing.apiKey) {
+      const prefix = existing.apiKey.substring(0, 8);
+      const suffix = existing.apiKey.substring(existing.apiKey.length - 4);
+      const masked = `${prefix}...${suffix}`;
+
+      // If the provided key matches the masked pattern of the existing key, keep the existing key
+      if (provider.apiKey === masked) {
+        console.log(`Restoring original API key for provider ${provider.name}`);
+        provider.apiKey = existing.apiKey;
+      }
+    }
+    if (existing) {
+      providers[existingIndex] = provider;
+    }
   } else {
     providers.push(provider);
   }
@@ -158,7 +185,11 @@ export function setActiveProvider(id: string): boolean {
 export async function fetchModelsFromAPI(baseUrl: string, apiKey: string): Promise<string[]> {
   try {
     const normalizedUrl = baseUrl.replace(/\/+$/, '').replace(/\/chat\/completions\/?$/, '');
-    const client = new OpenAI({ apiKey, baseURL: normalizedUrl });
+    const client = new OpenAI({
+      apiKey,
+      baseURL: normalizedUrl,
+      timeout: 10000
+    });
 
     const response = await client.models.list();
     const models: string[] = [];
@@ -182,11 +213,13 @@ export interface AIRequest {
   content: string;
   systemPrompt?: string;
   userPrompt?: string;
+  history?: { role: 'user' | 'ai'; content: string }[];
 }
 
 const DEFAULT_PROMPTS: Record<AIMode, { system: string; user: string }> = {
   diagnose: {
     system: `You are an expert academic writing reviewer for top-tier computer science conferences (IEEE S&P, USENIX Security, OSDI, CCS).
+
 Your goal is to analyze and discuss the paper's structure, logic flow, and argumentation.
 
 Provide constructive feedback on:
@@ -262,9 +295,42 @@ export interface ProjectPrompts {
 }
 
 // Default shared system prompt
-const DEFAULT_SHARED_SYSTEM = `You are an expert academic writing assistant for top-tier computer science conferences (IEEE S&P, USENIX Security, OSDI, CCS).
-You help researchers refine their papers to meet high publication standards.
-Be specific, constructive, and professional in your feedback and edits.`;
+const DEFAULT_SHARED_SYSTEM = `**System Role:**
+You are a strict and professional academic editor and reviewer for top-tier computer security and systems conferences (such as IEEE S&P, USENIX Security, OSDI, CCS). Your goal is to refine the user's draft to meet the high standards of these venues, specifically mimicking the writing style of high-quality systems papers (e.g., the "bpftime" OSDI'25 paper).
+
+**Task:**
+Rewrite and polish the provided text. The goal is to make it **concise, precise, and authoritative**.
+
+**Style Guidelines (Strictly Follow These):**
+
+1. **Conciseness & Density (High Information Density):**
+    - Eliminate all "fluff," filler words, and redundant adjectives (e.g., remove "very," "extremely," "successfully").
+    - Every sentence must convey new information or a necessary logical step.
+    - Avoid long-winded passive constructions. Use **Active Voice** whenever possible (e.g., Change "The data is validated by the system" to "The system validates the data").
+
+2. **Authoritative & Direct Tone:**
+    - Use strong, specific verbs (e.g., _enforce, guarantee, mitigate, isolate, decouple, orchestrate_).
+    - Avoid hedging or weak language (e.g., avoid "we try to," "it seems that"). Be confident in the contributions (e.g., "We demonstrate," "We present").
+    - When describing your own work, use "We + Verb" (e.g., "We introduce EIM...").
+
+3. **Logical Flow & Signposting:**
+    - Use logical connectors to guide the reader's thinking, similar to a mathematical proof.
+    - Use phrases like: _In contrast, Conversely, Consequently, Specifically, To address this challenge, On the one hand... On the other hand..._
+    - Ensure the problem statement clearly articulates the **tension** or **trade-off** (e.g., "Safety vs. Efficiency").
+
+4. **Terminological Precision:**
+    - Ensure technical terms are used consistently.
+    - Distinguish clearly between actors (e.g., "Attacker" vs. "User" vs. "Developer").
+    - Avoid vague pronouns. If "it" is ambiguous, repeat the noun.
+
+5. **Quantitative over Qualitative:**
+    - Prefer "reduces overhead by 5x" over "greatly reduces overhead."
+    - Prefer "negligible performance impact (<1%)" over "very fast."
+
+**Example of Style Transformation:**
+
+- _Bad (Draft):_ "We made a new system called X that is very good at stopping attacks. It is better than Y because Y is slow. X uses a cool technique to check memory."
+- _Good (Target Style):_ "We present X, a system that enforces memory safety with negligible overhead. Unlike Y, which relies on slow context switches, X employs lightweight in-process isolation to mitigate attacks efficiently."`;
 
 // Get project prompts (returns project-specific or defaults)
 export function getProjectPrompts(projectId: string): ProjectPrompts {
@@ -323,7 +389,7 @@ export function saveProjectPrompts(projectId: string, prompts: Partial<ProjectPr
 // Export default shared system prompt for reset
 export { DEFAULT_SHARED_SYSTEM };
 
-export async function processWithAI(request: AIRequest): Promise<string> {
+export async function processWithAI(request: AIRequest): Promise<{ content: string; model: string }> {
   const config = getLLMConfig();
 
   if (!config.apiKey) {
@@ -333,17 +399,24 @@ export async function processWithAI(request: AIRequest): Promise<string> {
   const baseURL = config.baseUrl.replace(/\/chat\/completions\/?$/, '');
   const client = new OpenAI({
     apiKey: config.apiKey,
-    baseURL
+    baseURL,
+    timeout: 30000 // Increased timeout for long content
   });
 
   const systemPrompt = request.systemPrompt || DEFAULT_PROMPTS[request.mode].system;
   const userContent = `${request.userPrompt || DEFAULT_PROMPTS[request.mode].user}\n\n${request.content}`;
+
+  const historyMessages = request.history?.map(m => ({
+    role: m.role === 'ai' ? 'assistant' : 'user',
+    content: m.content
+  })) as OpenAI.Chat.Completions.ChatCompletionMessageParam[] || [];
 
   try {
     const response = await client.chat.completions.create({
       model: config.model,
       messages: [
         { role: 'system', content: systemPrompt },
+        ...historyMessages,
         { role: 'user', content: userContent }
       ],
       temperature: request.mode === 'quickfix' ? 0.1 : 0.3,
@@ -355,7 +428,10 @@ export async function processWithAI(request: AIRequest): Promise<string> {
       throw new Error('AI API returned empty content');
     }
 
-    return stripMarkdownCodeFences(content);
+    return {
+      content: stripMarkdownCodeFences(content),
+      model: config.model
+    };
   } catch (error) {
     if (error instanceof OpenAI.APIError) {
       throw new Error(`API error ${error.status}: ${error.message}`);
@@ -368,4 +444,29 @@ function stripMarkdownCodeFences(text: string): string {
   const trimmed = text.trim();
   const match = trimmed.match(/^\s*```[\w-]*\s*\n([\s\S]*?)\n```\s*$/);
   return (match?.[1] ?? trimmed).trim();
+}
+
+export async function loadAICache(projectPath: string): Promise<Record<string, any[]>> {
+  try {
+    const cachePath = join(projectPath, '.fastwrite', 'ai-cache.json');
+    if (!existsSync(cachePath)) return {};
+    const content = await Bun.file(cachePath).text();
+    return JSON.parse(content);
+  } catch (error) {
+    console.error('Failed to load AI cache:', error);
+    return {};
+  }
+}
+
+export async function saveAICache(projectPath: string, cache: Record<string, any[]>) {
+  try {
+    const dir = join(projectPath, '.fastwrite');
+    if (!existsSync(dir)) {
+      mkdirSync(dir, { recursive: true });
+    }
+    const cachePath = join(projectPath, '.fastwrite', 'ai-cache.json');
+    await Bun.write(cachePath, JSON.stringify(cache, null, 2));
+  } catch (e) {
+    console.error('Failed to save AI cache:', e);
+  }
 }

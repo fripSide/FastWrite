@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync, statSync, mkdirSync } from "node:fs";
-import { join, extname, basename } from "node:path";
+import { join, extname, basename, dirname } from "node:path";
 import { execSync } from "node:child_process";
 import type { FileNode } from "../web/src/types";
 import {
@@ -11,7 +11,9 @@ import {
   updateProjectConfig,
   getActiveProject
 } from "./projectConfig";
-import { processWithAI, getLLMConfig, saveLLMConfig, getLLMProviders, saveLLMProvider, deleteLLMProvider, setActiveProvider, fetchModelsFromAPI, getProjectPrompts, saveProjectPrompts, DEFAULT_PROMPTS, type LLMProvider, type ProjectPrompts } from "./llmService";
+import { processWithAI, getLLMConfig, saveLLMConfig, getLLMProviders, saveLLMProvider, deleteLLMProvider, setActiveProvider, fetchModelsFromAPI, getProjectPrompts, saveProjectPrompts, loadAICache, saveAICache, DEFAULT_PROMPTS, type LLMProvider, type ProjectPrompts } from "./llmService";
+
+
 import { isEmbeddedAsset, getEmbeddedAsset } from "./embeddedAssets";
 
 const PORT = parseInt(process.env.PORT || "3002", 10);
@@ -157,6 +159,25 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     if (!projectId) return json({ error: "Project ID required" }, 400);
     const success = await setActiveProject(projectId);
     return success ? json({ success: true }) : json({ error: "Project not found" }, 404);
+  },
+
+  "GET:/api/projects/:id/ai-cache": async (_req, params) => {
+    const projectId = params[0];
+    if (!projectId) return json({ error: "Project ID required" }, 400);
+    const config = await getProjectConfig(projectId);
+    if (!config) return json({ error: "Project not found" }, 404);
+    const cache = await loadAICache(config.sectionsDir);
+    return json(cache);
+  },
+
+  "POST:/api/projects/:id/ai-cache": async (req, params) => {
+    const projectId = params[0];
+    if (!projectId) return json({ error: "Project ID required" }, 400);
+    const config = await getProjectConfig(projectId);
+    if (!config) return json({ error: "Project not found" }, 404);
+    const body = await req.json() as Record<string, any[]>;
+    await saveAICache(config.sectionsDir, body);
+    return json({ success: true });
   },
 
   "GET:/api/projects/:id/config": async (_req, params) => {
@@ -315,7 +336,7 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
         systemPrompt?: string;
         userPrompt?: string;
       };
-      return json({ content: await processWithAI(request) });
+      return json(await processWithAI(request));
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 500);
     }
@@ -344,19 +365,41 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
 
   "POST:/api/llm-config/test": async (req) => {
     try {
-      const config = await req.json() as { baseUrl: string; apiKey: string; model: string };
+      const config = await req.json() as { baseUrl: string; apiKey: string; model: string; providerId?: string };
 
       if (!config.apiKey) {
         return json({ success: false, error: "API key is required" }, 400);
+      }
+
+      let effectiveApiKey = config.apiKey;
+
+      // Check if key is masked and we have a provider ID to look up the real key
+      if (config.apiKey.includes('...') && config.providerId) {
+        const providers = getLLMProviders();
+        const storedProvider = providers.find(p => p.id === config.providerId);
+
+        if (storedProvider && storedProvider.apiKey) {
+          const prefix = storedProvider.apiKey.substring(0, 8);
+          const suffix = storedProvider.apiKey.substring(storedProvider.apiKey.length - 4);
+          const masked = `${prefix}...${suffix}`;
+
+          if (config.apiKey === masked) {
+            console.log(`Using stored API key for testing provider ${storedProvider.name}`);
+            effectiveApiKey = storedProvider.apiKey;
+          }
+        }
       }
 
       // Use OpenAI SDK to test connection
       const OpenAI = (await import('openai')).default;
       const baseURL = config.baseUrl.replace(/\/chat\/completions\/?$/, '');
       const client = new OpenAI({
-        apiKey: config.apiKey,
-        baseURL
+        apiKey: effectiveApiKey,
+        baseURL,
+        timeout: 10000 // 10s timeout
       });
+
+      console.log(`Testing connection to ${baseURL}...`);
 
       const response = await client.chat.completions.create({
         model: config.model,
@@ -365,6 +408,8 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
         temperature: 0
       });
 
+      console.log("Connection test success");
+
       const content = response.choices[0]?.message?.content;
       return json({
         success: true,
@@ -372,6 +417,7 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
         model: response.model
       });
     } catch (error) {
+      console.error("Connection test failed:", error);
       const message = error instanceof Error ? error.message : String(error);
       return json({ success: false, error: message }, 200); // Return 200 so frontend can show error
     }
@@ -478,7 +524,10 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
         const { unlinkSync } = await import("node:fs");
         unlinkSync(promptsFile);
       }
-      return json({ success: true, prompts: DEFAULT_PROMPTS });
+
+      // Return full default project prompts including keys that might be missing in DEFAULT_PROMPTS
+      const defaults = getProjectPrompts(projectId);
+      return json({ success: true, prompts: defaults });
     } catch (error) {
       return json({ error: "Failed to reset prompts" }, 500);
     }
@@ -533,37 +582,79 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     if (!existsSync(path)) return json({ error: "File not found" }, 404);
 
     try {
-      const content = readFileSync(path, 'utf-8');
-      const lines = content.split('\n');
-      const sections: { id: string; level: number; title: string; lineStart: number }[] = [];
+      const visited = new Set<string>();
+      const sections: { id: string; level: number; title: string; lineStart: number; filePath: string }[] = [];
+      const sectionRegex = /\\(section|subsection|subsubsection)\*?\s*\{([^}]*)\}/;
+      const inputRegex = /\\(?:input|include)\s*\{([^}]*)\}/;
 
-      const sectionRegex = /\\section\*?\s*\{([^}]*)\}/;
-      const subsectionRegex = /\\subsection\*?\s*\{([^}]*)\}/;
-      const subsubsectionRegex = /\\subsubsection\*?\s*\{([^}]*)\}/;
-
-      lines.forEach((line, index) => {
-        let match: RegExpExecArray | null = null;
-        let level = 0;
-
-        if ((match = sectionRegex.exec(line)) !== null) {
-          level = 1;
-        } else if ((match = subsectionRegex.exec(line)) !== null) {
-          level = 2;
-        } else if ((match = subsubsectionRegex.exec(line)) !== null) {
-          level = 3;
+      // Recursive function to parse files
+      function parseFile(filePath: string) {
+        // Resolve path: if no extension, try .tex
+        let resolvedPath = filePath;
+        if (!existsSync(resolvedPath) && existsSync(resolvedPath + '.tex')) {
+          resolvedPath += '.tex';
         }
 
-        if (match && level > 0) {
-          const title = match[1] || '';
-          const id = `section_${sections.length}`;
-          sections.push({
-            id,
-            level,
-            title: title.trim(),
-            lineStart: index + 1
-          });
+        console.log(`[ParseSections] Parsing: ${resolvedPath} (Original: ${filePath})`);
+
+        if (!existsSync(resolvedPath)) {
+          console.warn(`[ParseSections] File not found: ${filePath} -> ${resolvedPath}`);
+          return;
         }
-      });
+
+        // Avoid circular dependencies
+        if (visited.has(resolvedPath)) {
+          console.log(`[ParseSections] Skipping visited: ${resolvedPath}`);
+          return;
+        }
+        visited.add(resolvedPath);
+
+        const content = readFileSync(resolvedPath, 'utf-8');
+        const lines = content.split('\n');
+        // Use dirname from imported node:path
+        const currentDir = dirname(resolvedPath);
+
+        lines.forEach((line, index) => {
+          const trimmedLine = line.trim();
+          if (trimmedLine.startsWith('%')) return; // Skip comments
+
+          // Check for sections
+          const sectionMatch = sectionRegex.exec(line);
+          if (sectionMatch) {
+            const type = sectionMatch[1];
+            let level = 0;
+            if (type === 'section') level = 1;
+            else if (type === 'subsection') level = 2;
+            else if (type === 'subsubsection') level = 3;
+
+            if (level > 0) {
+              const title = (sectionMatch[2] || '').trim();
+              console.log(`[ParseSections] Found section: ${title} in ${resolvedPath} line ${index + 1}`);
+              sections.push({
+                id: `section_${sections.length}`,
+                level,
+                title,
+                lineStart: index + 1,
+                filePath: resolvedPath
+              });
+            }
+          }
+
+          // Check for inputs
+          const inputMatch = inputRegex.exec(line);
+          if (inputMatch) {
+            const includePath = (inputMatch[1] || '').trim();
+            if (!includePath) return;
+
+            // Resolve relative to current file's directory
+            const fullIncludePath = join(currentDir, includePath);
+            console.log(`[ParseSections] Found input: ${includePath} -> ${fullIncludePath}`);
+            parseFile(fullIncludePath);
+          }
+        });
+      }
+
+      parseFile(path);
 
       return json({ sections });
     } catch (error) {
