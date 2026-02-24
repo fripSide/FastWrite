@@ -7,7 +7,7 @@ class VirtualFileSystem {
     constructor(FS, options = {}) {
         this.FS = FS;
         this.MEMFS = FS.filesystems.MEMFS;
-        this.onLog = options.onLog || (() => { });
+        this.onLog = options.onLog || (() => {});
         this.mountedFiles = new Set();
         this.mountedDirs = new Set();
         this.pendingFontMaps = new Set();
@@ -247,7 +247,7 @@ class VirtualFileSystem {
                             rewritten = rewritten.replace(fullMatch, `${prefix}${candidatePath}`);
                             break;
                         }
-                    } catch (e) { }
+                    } catch (e) {}
                 }
             }
             return rewritten;
@@ -447,7 +447,7 @@ class VirtualFileSystem {
                     node.contents = this._createLazyMarker(marker.bundleName, marker.start, marker.end);
                     activated++;
                 }
-            } catch (e) { }
+            } catch (e) {}
         }
 
         this.deferredBundles.delete(bundleName);
@@ -476,20 +476,20 @@ class VirtualFileSystem {
             }
         };
         const originalRead = this.MEMFS.stream_ops.read;
-        this.MEMFS.stream_ops.read = function (stream, buffer, offset, length, position) {
+        this.MEMFS.stream_ops.read = function(stream, buffer, offset, length, position) {
             ensureResolved(stream.node);
             return originalRead.call(this, stream, buffer, offset, length, position);
         };
         if (this.MEMFS.ops_table?.file?.stream?.read) {
             const originalTableRead = this.MEMFS.ops_table.file.stream.read;
-            this.MEMFS.ops_table.file.stream.read = function (stream, buffer, offset, length, position) {
+            this.MEMFS.ops_table.file.stream.read = function(stream, buffer, offset, length, position) {
                 ensureResolved(stream.node);
                 return originalTableRead.call(this, stream, buffer, offset, length, position);
             };
         }
         if (this.MEMFS.stream_ops.mmap) {
             const originalMmap = this.MEMFS.stream_ops.mmap;
-            this.MEMFS.stream_ops.mmap = function (stream, length, position, prot, flags) {
+            this.MEMFS.stream_ops.mmap = function(stream, length, position, prot, flags) {
                 ensureResolved(stream.node);
                 return originalMmap.call(this, stream, length, position, prot, flags);
             };
@@ -510,7 +510,7 @@ class VirtualFileSystem {
         for (const part of parts) {
             current += '/' + part;
             if (this.mountedDirs.has(current)) continue;
-            try { this.FS.stat(current); } catch (e) { try { this.FS.mkdir(current); } catch (e2) { } }
+            try { this.FS.stat(current); } catch (e) { try { this.FS.mkdir(current); } catch (e2) {} }
             this.mountedDirs.add(current);
         }
     }
@@ -518,10 +518,10 @@ class VirtualFileSystem {
     _shouldEagerLoad(path) {
         // Eager load critical files that kpathsea needs to find
         return path.endsWith('.fmt') ||
-            path.endsWith('texmf.cnf') ||
-            path.endsWith('.map') ||
-            path.endsWith('.pfb') ||  // Type1 fonts - needed by pdfTeX
-            path.endsWith('.enc');    // Encoding files - needed by pdfTeX
+               path.endsWith('texmf.cnf') ||
+               path.endsWith('.map') ||
+               path.endsWith('.pfb') ||  // Type1 fonts - needed by pdfTeX
+               path.endsWith('.enc');    // Encoding files - needed by pdfTeX
     }
 
     _trackFontFile(path) {
@@ -1011,24 +1011,21 @@ function collectAuxFiles(FS) {
     const auxExtensions = ['.aux', '.toc', '.lof', '.lot', '.out', '.nav', '.snm', '.bbl', '.blg'];
     const files = {};
     for (const ext of auxExtensions) {
-        // Output directory matches -output-directory=output flag
-        const path = '/output/document' + ext;
+        const path = '/document' + ext;
         try {
             files[ext] = FS.readFile(path, { encoding: 'utf8' });
-        } catch (e) { }
+        } catch (e) {}
     }
     return files;
 }
 
 function restoreAuxFiles(FS, auxFiles) {
-    // Ensure /output directory exists for aux files
-    try { FS.mkdir('/output'); } catch (e) { }
     let restored = 0;
     for (const [ext, content] of Object.entries(auxFiles)) {
         try {
-            FS.writeFile('/output/document' + ext, content);
+            FS.writeFile('/document' + ext, content);
             restored++;
-        } catch (e) { }
+        } catch (e) {}
     }
     return restored;
 }
@@ -1119,7 +1116,7 @@ async function initBusyTeX(wasmModule, jsUrl, memorySnapshot = null) {
             outputCapture.stderr.push(text);
         },
         locateFile: (path) => path,
-        preRun: [function () {
+        preRun: [function() {
             moduleConfig.ENV = moduleConfig.ENV || {};
             configureTexEnvironment(moduleConfig.ENV);
         }],
@@ -1127,14 +1124,14 @@ async function initBusyTeX(wasmModule, jsUrl, memorySnapshot = null) {
 
     const Module = await busytex(moduleConfig);
     const FS = Module.FS;
-    try { FS.mkdir('/bin'); } catch (e) { }
-    try { FS.writeFile('/bin/busytex', ''); } catch (e) { }
+    try { FS.mkdir('/bin'); } catch (e) {}
+    try { FS.writeFile('/bin/busytex', ''); } catch (e) {}
 
-    Module.setPrefix = function (prefix) {
+    Module.setPrefix = function(prefix) {
         Module.thisProgram = '/bin/' + prefix;
     };
 
-    Module.callMainWithRedirects = function (args = [], print = false) {
+    Module.callMainWithRedirects = function(args = [], print = false) {
         Module.do_print = print;
         // Reset output capture before each call
         outputCapture.stdout.length = 0;
@@ -1175,8 +1172,8 @@ async function getOrCreateModule() {
 function resetFS(FS) {
     // Remove /texlive entirely and recreate structure
     try {
-        // Remove dynamically created directories and files
-        const dirsToClean = ['/texlive', '/output', '/document.tex', '/document.pdf', '/document.log', '/document.aux'];
+        // Remove dynamically created directories
+        const dirsToClean = ['/texlive', '/document.pdf', '/document.log', '/document.aux'];
         for (const path of dirsToClean) {
             try {
                 const stat = FS.stat(path);
@@ -1196,13 +1193,13 @@ function resetFS(FS) {
                                 }
                             }
                             FS.rmdir(dirPath);
-                        } catch (e) { }
+                        } catch (e) {}
                     };
                     removeDir(path);
                 } else {
                     FS.unlink(path);
                 }
-            } catch (e) { }
+            } catch (e) {}
         }
     } catch (e) {
         workerLog('FS reset warning: ' + e.message);
@@ -1350,9 +1347,6 @@ async function handleCompile(request) {
             // Reset filesystem for clean compilation
             resetFS(FS);
 
-            // Create output directory for -output-directory=output
-            try { FS.mkdir('/output'); } catch (e) { }
-
             // Create VFS with unified mount handling
             const vfs = new VirtualFileSystem(FS, {
                 onLog: workerLog,
@@ -1438,19 +1432,19 @@ async function handleCompile(request) {
 
             if (engine === 'pdflatex') {
                 result = Module.callMainWithRedirects([
-                    'pdflatex', '-output-directory=output', '--no-shell-escape', '--interaction=nonstopmode',
+                    'pdflatex', '--no-shell-escape', '--interaction=nonstopmode',
                     '--halt-on-error', '--synctex=-1', '--fmt=' + fmtPath, '/document.tex'
                 ]);
             } else {
                 result = Module.callMainWithRedirects([
-                    'xelatex', '-output-directory=output', '--no-shell-escape', '--interaction=nonstopmode',
+                    'xelatex', '--no-shell-escape', '--interaction=nonstopmode',
                     '--halt-on-error', '--synctex=-1', '--no-pdf',
                     '--fmt=/texlive/texmf-dist/texmf-var/web2c/xetex/xelatex.fmt',
                     '/document.tex'
                 ]);
                 if (result.exit_code === 0) {
                     result = Module.callMainWithRedirects([
-                        'xdvipdfmx', '-o', '/output/document.pdf', '/output/document.xdv'
+                        'xdvipdfmx', '-o', '/document.pdf', '/document.xdv'
                     ]);
                 }
             }
@@ -1459,14 +1453,14 @@ async function handleCompile(request) {
 
             if (result.exit_code === 0) {
                 try {
-                    pdfData = FS.readFile('/output/document.pdf');
+                    pdfData = FS.readFile('/document.pdf');
                     compileSuccess = true;
                     workerLog('Compilation successful!');
 
                     // Read SyncTeX data for source/PDF synchronization
                     // --synctex=-1 generates uncompressed .synctex file
                     try {
-                        const syncTexBytes = FS.readFile('/output/document.synctex');
+                        const syncTexBytes = FS.readFile('/document.synctex');
                         syncTexData = new TextDecoder().decode(syncTexBytes);
                         workerLog(`SyncTeX data: ${(syncTexBytes.byteLength / 1024).toFixed(1)}KB`);
                     } catch (e) {
@@ -1486,9 +1480,9 @@ async function handleCompile(request) {
                         // Check if log suggests rerun is needed
                         let logSaysRerun = false;
                         try {
-                            const logContent = FS.readFile('/output/document.log', { encoding: 'utf8' });
+                            const logContent = FS.readFile('/document.log', { encoding: 'utf8' });
                             logSaysRerun = rerunPattern.test(logContent);
-                        } catch (e) { }
+                        } catch (e) {}
 
                         if (!logSaysRerun) break;
 
@@ -1521,9 +1515,6 @@ async function handleCompile(request) {
                         Module = await getOrCreateModule();
                         FS = Module.FS;
                         resetFS(FS);
-
-                        // Create output directory for -output-directory=output
-                        try { FS.mkdir('/output'); } catch (e) { }
 
                         // Recreate VFS with same configuration
                         const rerunVfs = new VirtualFileSystem(FS, {
@@ -1574,31 +1565,31 @@ async function handleCompile(request) {
                         let rerunResult;
                         if (engine === 'pdflatex') {
                             rerunResult = Module.callMainWithRedirects([
-                                'pdflatex', '-output-directory=output', '--no-shell-escape', '--interaction=nonstopmode',
+                                'pdflatex', '--no-shell-escape', '--interaction=nonstopmode',
                                 '--halt-on-error', '--synctex=-1', '--fmt=' + fmtPath, '/document.tex'
                             ]);
                         } else {
                             // XeLaTeX: two-step process (xelatex -> xdvipdfmx)
                             rerunResult = Module.callMainWithRedirects([
-                                'xelatex', '-output-directory=output', '--no-shell-escape', '--interaction=nonstopmode',
+                                'xelatex', '--no-shell-escape', '--interaction=nonstopmode',
                                 '--halt-on-error', '--synctex=-1', '--no-pdf',
                                 '--fmt=' + fmtPath, '/document.tex'
                             ]);
                             if (rerunResult.exit_code === 0) {
                                 rerunResult = Module.callMainWithRedirects([
-                                    'xdvipdfmx', '-o', '/output/document.pdf', '/output/document.xdv'
+                                    'xdvipdfmx', '-o', '/document.pdf', '/document.xdv'
                                 ]);
                             }
                         }
 
                         if (rerunResult.exit_code === 0) {
-                            pdfData = FS.readFile('/output/document.pdf');
+                            pdfData = FS.readFile('/document.pdf');
                             workerLog(`Rerun ${rerunPass} successful`);
                             // Update SyncTeX data
                             try {
-                                const syncTexBytes = FS.readFile('/output/document.synctex');
+                                const syncTexBytes = FS.readFile('/document.synctex');
                                 syncTexData = new TextDecoder().decode(syncTexBytes);
-                            } catch (e) { }
+                            } catch (e) {}
                         } else {
                             workerLog(`Rerun ${rerunPass} failed, keeping previous PDF`);
                             break;
@@ -1713,7 +1704,7 @@ async function handleCompile(request) {
                 workerLog(`[RETRY] enableCtan=${options.enableCtan}`);
                 if (options.enableCtan) {
                     let logContent = '';
-                    try { logContent = new TextDecoder().decode(FS.readFile('/output/document.log')); } catch (e) { }
+                    try { logContent = new TextDecoder().decode(FS.readFile('/document.log')); } catch (e) {}
                     const allOutput = logContent + ' ' + (result.stdout || '') + ' ' + (result.stderr || '');
 
                     // Extract ALL missing files for parallel fetching
@@ -2048,7 +2039,7 @@ async function handleFormatGenerate(request) {
 
             // Check for missing packages - extract ALL and fetch in parallel
             let logContent = '';
-            try { logContent = new TextDecoder().decode(FS.readFile('/myformat.log')); } catch (e) { }
+            try { logContent = new TextDecoder().decode(FS.readFile('/myformat.log')); } catch (e) {}
             const allOutput = logContent + ' ' + (result.stdout || '') + ' ' + (result.stderr || '');
             const missingFiles = extractAllMissingFiles(allOutput, fetchedPackages);
 
@@ -2145,7 +2136,7 @@ async function handleFormatGenerate(request) {
 
 // ============ Message Handler ============
 
-self.onmessage = async function (e) {
+self.onmessage = async function(e) {
     const msg = e.data;
 
     switch (msg.type) {
@@ -2221,6 +2212,6 @@ self.onmessage = async function (e) {
     }
 };
 
-self.onerror = function (e) {
+self.onerror = function(e) {
     self.postMessage({ type: 'log', message: 'Worker error: ' + e.message });
 };

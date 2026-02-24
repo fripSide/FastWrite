@@ -368,84 +368,88 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                 </>
               )}
 
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Local Directory Path
-                </label>
-                <div className="flex gap-2">
+              {importType === 'local' && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Local Directory Path
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={directoryPath}
+                      onChange={(e) => {
+                        setDirectoryPath(e.target.value);
+                        setError(null);
+                      }}
+                      placeholder="/Users/username/documents/my-latex-paper"
+                      className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      disabled={isAnalyzing}
+                    />
+                    <button
+                      onClick={handleBrowse}
+                      disabled={isAnalyzing}
+                      className="px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 text-slate-700"
+                    >
+                      <FolderOpen size={18} />
+                      Browse...
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Enter the full path to your LaTeX project directory. Use Browse to detect .tex files.
+                  </p>
+                  <div className="mt-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
+                    <Info size={14} className="text-blue-500 flex-shrink-0 mt-0.5" />
+                    <p className="text-xs text-blue-700">
+                      Files will be <strong>copied</strong> into the project directory. Your original files will not be modified.
+                    </p>
+                  </div>
+                  {texFilesInDir.length > 0 && (
+                    <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                      <div className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1">
+                        <FileText size={12} className="text-orange-500" />
+                        Select main .tex file:
+                      </div>
+                      {texFilesInDir.map(f => (
+                        <label
+                          key={f}
+                          className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors ${selectedMainFile === f
+                            ? 'bg-blue-50 border border-blue-200'
+                            : 'hover:bg-white border border-transparent'
+                            }`}
+                        >
+                          <input
+                            type="radio"
+                            name="mainTexFile"
+                            checked={selectedMainFile === f}
+                            onChange={() => setSelectedMainFile(f)}
+                            className="accent-blue-600"
+                          />
+                          <FileText size={14} className={selectedMainFile === f ? 'text-orange-500' : 'text-slate-400'} />
+                          <span className={`text-sm ${selectedMainFile === f ? 'font-medium text-slate-800' : 'text-slate-600'}`}>
+                            {f}
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {importType === 'local' && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Project Name
+                  </label>
                   <input
                     type="text"
-                    value={directoryPath}
-                    onChange={(e) => {
-                      setDirectoryPath(e.target.value);
-                      setError(null);
-                    }}
-                    placeholder="/Users/username/documents/my-latex-paper"
-                    className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    value={projectName}
+                    onChange={(e) => setProjectName(e.target.value)}
+                    placeholder="My Academic Paper"
+                    className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     disabled={isAnalyzing}
                   />
-                  <button
-                    onClick={handleBrowse}
-                    disabled={isAnalyzing}
-                    className="px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors flex items-center gap-2 text-slate-700"
-                  >
-                    <FolderOpen size={18} />
-                    Browse...
-                  </button>
                 </div>
-                <p className="mt-1 text-xs text-slate-500">
-                  Enter the full path to your LaTeX project directory. Use Browse to detect .tex files.
-                </p>
-                <div className="mt-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
-                  <Info size={14} className="text-blue-500 flex-shrink-0 mt-0.5" />
-                  <p className="text-xs text-blue-700">
-                    Files will be <strong>copied</strong> into the project directory. Your original files will not be modified.
-                  </p>
-                </div>
-                {texFilesInDir.length > 0 && (
-                  <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
-                    <div className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1">
-                      <FileText size={12} className="text-orange-500" />
-                      Select main .tex file:
-                    </div>
-                    {texFilesInDir.map(f => (
-                      <label
-                        key={f}
-                        className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors ${selectedMainFile === f
-                          ? 'bg-blue-50 border border-blue-200'
-                          : 'hover:bg-white border border-transparent'
-                          }`}
-                      >
-                        <input
-                          type="radio"
-                          name="mainTexFile"
-                          checked={selectedMainFile === f}
-                          onChange={() => setSelectedMainFile(f)}
-                          className="accent-blue-600"
-                        />
-                        <FileText size={14} className={selectedMainFile === f ? 'text-orange-500' : 'text-slate-400'} />
-                        <span className={`text-sm ${selectedMainFile === f ? 'font-medium text-slate-800' : 'text-slate-600'}`}>
-                          {f}
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Project Name
-                </label>
-                <input
-                  type="text"
-                  value={projectName}
-                  onChange={(e) => setProjectName(e.target.value)}
-                  placeholder="My Academic Paper"
-                  className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  disabled={isAnalyzing}
-                />
-              </div>
+              )}
 
               {duplicateInfo && (
                 <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-700 text-sm flex items-start gap-2">
@@ -467,14 +471,31 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                 <button
                   onClick={onClose}
                   className="px-4 py-2 border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-                  disabled={isAnalyzing}
+                  disabled={isAnalyzing || isImporting}
                 >
                   Cancel
                 </button>
-                {duplicateInfo ? (
+                {importType === 'github' ? (
+                  <button
+                    onClick={handleImport}
+                    disabled={isImporting || !githubUrl.trim()}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isImporting ? (
+                      <>
+                        <Loader2 size={16} className="animate-spin" />
+                        Cloning...
+                      </>
+                    ) : (
+                      <>
+                        <Github size={16} />
+                        Clone & Import
+                      </>
+                    )}
+                  </button>
+                ) : duplicateInfo ? (
                   <button
                     onClick={() => {
-                      // Directly import the existing project (activates it)
                       handleImport();
                     }}
                     disabled={isImporting}
