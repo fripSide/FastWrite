@@ -99,47 +99,40 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
 
   const handleBrowse = async () => {
     try {
-      // Use native browser directory picker
-      const dirHandle = await (window as any).showDirectoryPicker({ mode: 'read' });
+      // Use server-side native OS directory picker to get full path
+      const result = await api.browseDirectory();
+      if (!result?.path) return; // User cancelled
 
-      // Read .tex files from the selected directory
-      const texFiles: string[] = [];
-      for await (const entry of dirHandle.values()) {
-        if (entry.kind === 'file' && entry.name.endsWith('.tex')) {
-          texFiles.push(entry.name);
-        }
-      }
-      texFiles.sort();
-      setTexFilesInDir(texFiles);
-
-      // Auto-detect main file: read each .tex to find \documentclass
-      let mainFile: string | null = null;
-      for (const name of texFiles) {
-        try {
-          const fileHandle = await dirHandle.getFileHandle(name);
-          const file = await fileHandle.getFile();
-          const text = await file.text();
-          if (text.includes('\\documentclass')) {
-            mainFile = name;
-            break;
-          }
-        } catch { /* ignore */ }
-      }
-      // Fallback to common names
-      if (!mainFile) {
-        mainFile = texFiles.find(f => ['main.tex', 'paper.tex', 'document.tex'].includes(f)) || texFiles[0] || null;
-      }
-      setSelectedMainFile(mainFile);
-
-      // Note: showDirectoryPicker only gives folder name, not full path.
-      // User needs to confirm/edit the full path in the input.
-      // Pre-fill with the folder name as a hint.
-      if (!directoryPath) {
-        setDirectoryPath(dirHandle.name);
-      }
+      const fullPath = result.path.replace(/\/+$/, '');
+      setDirectoryPath(fullPath);
       setError(null);
+
+      // Use server-side list-directory to detect .tex files
+      try {
+        const dirInfo = await fetch('/api/utils/list-directory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: fullPath })
+        });
+        if (dirInfo.ok) {
+          const data = await dirInfo.json();
+          const texFiles = (data.texFiles || []).map((f: any) => f.name);
+          setTexFilesInDir(texFiles);
+
+          // Auto-detect main file (server already sorts documentclass files first)
+          if (texFiles.length > 0) {
+            const docClassFile = (data.texFiles || []).find((f: any) => f.hasDocumentclass);
+            const mainFile = docClassFile?.name
+              || texFiles.find((f: string) => ['main.tex', 'paper.tex', 'document.tex'].includes(f))
+              || texFiles[0]
+              || null;
+            setSelectedMainFile(mainFile);
+          } else {
+            setSelectedMainFile(null);
+          }
+        }
+      } catch { /* ignore list errors */ }
     } catch (err: any) {
-      // User cancelled picker - that's fine
       if (err?.name !== 'AbortError') {
         setError('Could not open directory picker');
       }
