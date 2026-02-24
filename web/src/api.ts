@@ -27,13 +27,26 @@ export const api = {
   saveProjectConfig: (projectId: string, config: Partial<import('./types').ProjectConfig>) =>
     postJson<import('./types').ProjectConfig>(`/api/projects/${projectId}/config`, config),
 
-  importLocalProject: (path: string, name: string, mainFile?: string) =>
-    postJson<Project>('/api/projects/import-local', { path, name, mainFile }),
+  importLocalProject: (path: string, name: string, mainFile?: string, copyFiles: boolean = true) =>
+    postJson<Project>('/api/projects/import-local', { path, name, mainFile, copyFiles }),
 
   importGitHubProject: (url: string, branch?: string) =>
-    postJson<{ success: boolean; path: string; name: string }>('/api/projects/import-github', { url, branch }),
+    postJson<{ success: boolean; project: Project; path: string; name: string }>('/api/projects/import-github', { url, branch }),
 
   browseDirectory: () => postJson<{ path: string | null }>('/api/utils/browse-directory', {}),
+
+  // GitHub Settings
+  getGitHubSettings: () => fetchJson<{ token: string; hasToken: boolean }>('/api/github/settings'),
+
+  saveGitHubSettings: (token: string) =>
+    postJson<{ success: boolean }>('/api/github/settings', { token }),
+
+  // Git Operations
+  gitStatus: (projectId: string) =>
+    fetchJson<{ isGitRepo: boolean; changes: string[]; branch: string; ahead: number }>(`/api/projects/${projectId}/git-status`),
+
+  gitPush: (projectId: string, message: string) =>
+    postJson<{ success: boolean; error?: string }>(`/api/projects/${projectId}/git-push`, { message }),
 
   // System Prompt
   getSystemPrompt: async (projectId: string) => {

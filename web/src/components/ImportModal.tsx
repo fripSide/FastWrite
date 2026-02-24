@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { FolderOpen, X, FileText, Loader2, Github, AlertCircle } from 'lucide-react';
+import { FolderOpen, X, FileText, Loader2, Github, AlertCircle, Key, Info } from 'lucide-react';
 import type { Project, FileNode } from '../types';
 import { api } from '../api';
 
@@ -34,6 +34,9 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
   const [githubBranch, setGithubBranch] = useState('main');
   const [selectedMainFile, setSelectedMainFile] = useState<string | null>(null);
   const [texFilesInDir, setTexFilesInDir] = useState<string[]>([]);
+  const [githubToken, setGithubToken] = useState('');
+  const [hasToken, setHasToken] = useState(false);
+  const [savingToken, setSavingToken] = useState(false);
 
   // Helper to extract name from path
   const extractNameFromPath = (path: string): string => {
@@ -67,6 +70,18 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
       setDuplicateInfo(null);
     }
   }, [directoryPath, existingProjects]);
+
+  // Load GitHub settings when modal opens
+  useEffect(() => {
+    if (isOpen) {
+      api.getGitHubSettings().then(settings => {
+        if (settings) {
+          setHasToken(settings.hasToken);
+          if (settings.hasToken) setGithubToken(settings.token);
+        }
+      });
+    }
+  }, [isOpen]);
 
   // Handle ESC key
   useEffect(() => {
@@ -183,16 +198,19 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
       let result: Project | null = null;
 
       if (importType === 'local') {
-        result = await api.importLocalProject(directoryPath, projectName, selectedMainFile || undefined);
+        // Copy files to project directory
+        result = await api.importLocalProject(directoryPath, projectName, selectedMainFile || undefined, true);
       } else if (importType === 'github') {
         if (!githubUrl.trim()) {
           setError('Please enter a GitHub URL');
+          setIsImporting(false);
+          setStage('input');
           return;
         }
 
         const githubResult = await api.importGitHubProject(githubUrl, githubBranch);
-        if (githubResult?.success) {
-          result = await api.importLocalProject(githubResult.path, githubResult.name);
+        if (githubResult?.success && githubResult.project) {
+          result = githubResult.project;
           setProjectName(githubResult.name);
         }
       }
@@ -209,11 +227,29 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
         setDuplicateInfo(null);
       } else {
         setError('Failed to import project');
+        setStage('input');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to import project');
+      setStage('input');
     } finally {
       setIsImporting(false);
+    }
+  };
+
+  const handleSaveToken = async () => {
+    setSavingToken(true);
+    try {
+      const result = await api.saveGitHubSettings(githubToken);
+      if (result?.success) {
+        setHasToken(true);
+      } else {
+        setError('Failed to save token');
+      }
+    } catch {
+      setError('Failed to save token');
+    } finally {
+      setSavingToken(false);
     }
   };
 
@@ -274,6 +310,36 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
 
               {importType === 'github' && (
                 <>
+                  {/* GitHub Token Config */}
+                  <div className="p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Key size={14} className="text-slate-500" />
+                      <span className="text-sm font-medium text-slate-700">GitHub Token</span>
+                      {hasToken && (
+                        <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Configured</span>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={githubToken}
+                        onChange={(e) => setGithubToken(e.target.value)}
+                        placeholder={hasToken ? '••••••••' : 'ghp_xxxxxxxxxxxx'}
+                        className="flex-1 px-3 py-1.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      />
+                      <button
+                        onClick={handleSaveToken}
+                        disabled={savingToken || !githubToken.trim()}
+                        className="px-3 py-1.5 text-sm bg-slate-700 text-white rounded-lg hover:bg-slate-800 transition-colors disabled:opacity-50"
+                      >
+                        {savingToken ? 'Saving...' : 'Save'}
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-xs text-slate-500">
+                      Required for private repos. Generate at GitHub → Settings → Developer settings → Personal access tokens.
+                    </p>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-medium text-slate-700 mb-2">
                       GitHub Repository URL
@@ -337,6 +403,12 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                 <p className="mt-1 text-xs text-slate-500">
                   Enter the full path to your LaTeX project directory. Use Browse to detect .tex files.
                 </p>
+                <div className="mt-2 p-2.5 bg-blue-50 border border-blue-200 rounded-lg flex items-start gap-2">
+                  <Info size={14} className="text-blue-500 flex-shrink-0 mt-0.5" />
+                  <p className="text-xs text-blue-700">
+                    Files will be <strong>copied</strong> into the project directory. Your original files will not be modified.
+                  </p>
+                </div>
                 {texFilesInDir.length > 0 && (
                   <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
                     <div className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1">
@@ -347,8 +419,8 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                       <label
                         key={f}
                         className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors ${selectedMainFile === f
-                            ? 'bg-blue-50 border border-blue-200'
-                            : 'hover:bg-white border border-transparent'
+                          ? 'bg-blue-50 border border-blue-200'
+                          : 'hover:bg-white border border-transparent'
                           }`}
                       >
                         <input
@@ -515,7 +587,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
           )}
         </div>
       </div>
-    </div>
+    </div >
   );
 };
 

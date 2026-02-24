@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Folder, FolderOpen, ChevronRight, ChevronDown, FileText, Image as ImageIcon, Trash2, Settings, RefreshCw, Check, X, Edit2, FilePlus, FolderPlus, ExternalLink, FileCheck } from 'lucide-react';
+import { Folder, FolderOpen, ChevronRight, ChevronDown, FileText, Image as ImageIcon, Trash2, Settings, RefreshCw, Check, X, Edit2, FilePlus, FolderPlus, ExternalLink, FileCheck, GitBranch, Upload } from 'lucide-react';
 import type { Project, FileNode, SelectedProject, SectionNode } from '../types';
 import { api } from '../api';
 import SystemPromptModal from './SystemPromptModal';
@@ -35,6 +35,14 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: FileNode } | null>(null);
   const [renamingNode, setRenamingNode] = useState<FileNode | null>(null);
   const [renameValue, setRenameValue] = useState('');
+
+  // Git state for GitHub projects
+  const [gitChanges, setGitChanges] = useState<string[]>([]);
+  const [gitBranch, setGitBranch] = useState('');
+  const [showPushModal, setShowPushModal] = useState(false);
+  const [commitMessage, setCommitMessage] = useState('');
+  const [isPushing, setIsPushing] = useState(false);
+  const [pushError, setPushError] = useState<string | null>(null);
 
   // Sidebar Resize Logic
   const [sidebarWidth, setSidebarWidth] = useState(320);
@@ -119,6 +127,46 @@ const Sidebar: React.FC<SidebarProps> = ({
   useEffect(() => {
     refreshProjectFiles();
   }, [refreshProjectFiles]);
+
+  // Load git status for github-type projects
+  useEffect(() => {
+    if (selectedProject?.project?.type === 'github') {
+      api.gitStatus(selectedProject.project.id).then(status => {
+        if (status) {
+          setGitChanges(status.changes);
+          setGitBranch(status.branch);
+        }
+      });
+    } else {
+      setGitChanges([]);
+      setGitBranch('');
+    }
+  }, [selectedProject?.project?.id, selectedProject?.project?.type]);
+
+  const handleGitPush = async () => {
+    if (!selectedProject || !commitMessage.trim()) return;
+    setIsPushing(true);
+    setPushError(null);
+    try {
+      const result = await api.gitPush(selectedProject.project.id, commitMessage);
+      if (result?.success) {
+        setShowPushModal(false);
+        setCommitMessage('');
+        // Refresh git status
+        const status = await api.gitStatus(selectedProject.project.id);
+        if (status) {
+          setGitChanges(status.changes);
+          setGitBranch(status.branch);
+        }
+      } else {
+        setPushError(result?.error || 'Push failed');
+      }
+    } catch (err) {
+      setPushError(err instanceof Error ? err.message : 'Push failed');
+    } finally {
+      setIsPushing(false);
+    }
+  };
 
   const parseLaTeXOutline = async (sectionsDir: string): Promise<void> => {
     try {
@@ -567,6 +615,34 @@ const Sidebar: React.FC<SidebarProps> = ({
                   <span>System Prompt</span>
                   <ChevronRight size={14} className="ml-auto" />
                 </button>
+
+                {selectedProject.project.type === 'github' && (
+                  <button
+                    onClick={() => {
+                      setShowPushModal(true);
+                      setPushError(null);
+                      // Refresh git status when opening
+                      api.gitStatus(selectedProject.project.id).then(status => {
+                        if (status) {
+                          setGitChanges(status.changes);
+                          setGitBranch(status.branch);
+                        }
+                      });
+                    }}
+                    className="flex items-center gap-2 text-sm text-slate-600 hover:text-green-600 hover:bg-green-50 px-3 py-2 rounded-lg w-full transition-colors"
+                  >
+                    <GitBranch size={16} />
+                    <span>Push to GitHub</span>
+                    {gitChanges.length > 0 && (
+                      <span className="ml-auto bg-amber-100 text-amber-700 text-xs font-medium px-1.5 py-0.5 rounded-full">
+                        {gitChanges.length}
+                      </span>
+                    )}
+                    {gitChanges.length === 0 && (
+                      <ChevronRight size={14} className="ml-auto" />
+                    )}
+                  </button>
+                )}
               </div>
 
               {files.length > 0 ? (
@@ -794,6 +870,86 @@ const Sidebar: React.FC<SidebarProps> = ({
             </button>
           </div>
         </>
+      )}
+
+      {/* Push to GitHub Modal */}
+      {showPushModal && selectedProject && (
+        <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-[100]">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-md">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Upload size={18} className="text-green-600" />
+                Push to GitHub
+              </h3>
+              <button
+                onClick={() => setShowPushModal(false)}
+                className="p-1 hover:bg-slate-100 rounded transition-colors"
+                disabled={isPushing}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4">
+              {gitBranch && (
+                <div className="flex items-center gap-2 text-sm text-slate-600">
+                  <GitBranch size={14} />
+                  <span>Branch: <strong>{gitBranch}</strong></span>
+                </div>
+              )}
+              <div>
+                <div className="text-sm font-medium text-slate-700 mb-1">
+                  Changed Files ({gitChanges.length})
+                </div>
+                {gitChanges.length > 0 ? (
+                  <div className="max-h-32 overflow-y-auto bg-slate-50 rounded-lg border border-slate-200 p-2 text-xs font-mono text-slate-600">
+                    {gitChanges.map((c, i) => <div key={i}>{c}</div>)}
+                  </div>
+                ) : (
+                  <p className="text-sm text-slate-500">No changes to commit</p>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  Commit Message
+                </label>
+                <input
+                  type="text"
+                  value={commitMessage}
+                  onChange={(e) => setCommitMessage(e.target.value)}
+                  placeholder="Update paper"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  disabled={isPushing}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && commitMessage.trim()) handleGitPush(); }}
+                />
+              </div>
+              {pushError && (
+                <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm">
+                  {pushError}
+                </div>
+              )}
+              <div className="flex justify-end gap-3">
+                <button
+                  onClick={() => setShowPushModal(false)}
+                  className="px-4 py-2 text-sm border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+                  disabled={isPushing}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleGitPush}
+                  disabled={isPushing || !commitMessage.trim() || gitChanges.length === 0}
+                  className="px-4 py-2 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isPushing ? (
+                    <><RefreshCw size={14} className="animate-spin" /> Pushing...</>
+                  ) : (
+                    <><Upload size={14} /> Commit & Push</>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* System Prompt Modal */}

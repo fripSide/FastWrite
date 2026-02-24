@@ -9,8 +9,10 @@ import {
   setActiveProject,
   getProjectConfig,
   updateProjectConfig,
-  getActiveProject
+  getActiveProject,
+  getProjectFilesDir
 } from "./projectConfig";
+import { loadGitHubSettings, saveGitHubSettings, cloneRepo, getGitStatus, pushChanges } from "./githubService";
 import { processWithAI, getLLMConfig, saveLLMConfig, getLLMProviders, saveLLMProvider, deleteLLMProvider, setActiveProvider, fetchModelsFromAPI, getProjectPrompts, saveProjectPrompts, loadAICache, saveAICache, DEFAULT_PROMPTS, type LLMProvider, type ProjectPrompts } from "./llmService";
 
 
@@ -152,9 +154,15 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
 
   "POST:/api/projects/import-local": async (req) => {
     try {
-      const { path, name, mainFile } = await req.json() as { path: string; name: string; mainFile?: string };
+      const { path, name, mainFile, copyFiles } = await req.json() as { path: string; name: string; mainFile?: string; copyFiles?: boolean };
       if (!path || !name) return json({ error: "path and name are required" }, 400);
-      return json(await createProject(name, path, mainFile));
+      return json(await createProject({
+        name,
+        localPath: path,
+        mainFileOverride: mainFile,
+        copyFiles: copyFiles ?? true,
+        projectType: 'local'
+      }));
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 500);
     }
@@ -642,25 +650,113 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
       const repoName = repo?.replace(/\.git$/, '') || '';
       const projectBranch = branch || 'main';
 
+      // Get token from settings
+      const settings = loadGitHubSettings();
+      const token = settings.token || undefined;
+
+      // Clone into a temporary location first
       const tempDir = join(process.cwd(), "projs", `temp_${Date.now()}`);
-      const targetDir = join(tempDir, repoName);
+      const cloneTarget = join(tempDir, repoName);
 
-      mkdirSync(tempDir, { recursive: true });
+      const cloneResult = cloneRepo(
+        `https://github.com/${owner}/${repo}.git`,
+        projectBranch,
+        cloneTarget,
+        token
+      );
 
-      try {
-        execSync(`git clone --depth 1 --branch ${projectBranch} https://github.com/${owner}/${repo}.git ${targetDir}`, {
-          stdio: 'inherit',
-          timeout: 60000
-        });
-
-        return json({
-          success: true,
-          path: targetDir,
-          name: repoName
-        });
-      } catch (error) {
-        return json({ error: `Git clone failed: ${error instanceof Error ? error.message : String(error)}` }, 500);
+      if (!cloneResult.success) {
+        return json({ error: `Git clone failed: ${cloneResult.error}` }, 500);
       }
+
+      // Create project with the cloned files (no copy needed, clone is already in our dir)
+      const project = await createProject({
+        name: repoName,
+        localPath: cloneTarget,
+        projectType: 'github',
+        githubUrl: `https://github.com/${owner}/${repo}`,
+        githubBranch: projectBranch,
+        copyFiles: false  // Already cloned into our directory
+      });
+
+      // Move cloned files into project's files directory
+      const filesDir = getProjectFilesDir(project.id);
+      const { cpSync, rmSync: rmSyncFn } = await import('node:fs');
+      cpSync(cloneTarget, filesDir, { recursive: true });
+      rmSyncFn(tempDir, { recursive: true, force: true });
+
+      // Update project config to point to files dir
+      await updateProjectConfig(project.id, { sectionsDir: filesDir });
+
+      // Update project metadata localPath
+      const projects = await loadProjects();
+      const proj = projects.find(p => p.id === project.id);
+      if (proj) {
+        proj.localPath = filesDir;
+        const { writeFileSync: wfs } = await import('node:fs');
+        wfs(join(process.cwd(), 'projs', 'projects.json'), JSON.stringify(projects, null, 2), 'utf-8');
+      }
+
+      return json({
+        success: true,
+        project,
+        path: filesDir,
+        name: repoName
+      });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  // ============ GitHub Settings & Git Operations ============
+
+  "GET:/api/github/settings": async () => {
+    const settings = loadGitHubSettings();
+    return json({
+      token: settings.token ? `${settings.token.substring(0, 6)}...${settings.token.substring(settings.token.length - 4)}` : '',
+      hasToken: !!settings.token
+    });
+  },
+
+  "POST:/api/github/settings": async (req) => {
+    try {
+      const { token } = await req.json() as { token: string };
+      const success = saveGitHubSettings({ token });
+      return success ? json({ success: true }) : json({ error: "Failed to save settings" }, 500);
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "GET:/api/projects/:id/git-status": async (_req, params) => {
+    const projectId = params[0];
+    if (!projectId) return json({ error: "Project ID required" }, 400);
+
+    const config = await getProjectConfig(projectId);
+    if (!config) return json({ error: "Project not found" }, 404);
+
+    const status = getGitStatus(config.sectionsDir);
+    return json(status);
+  },
+
+  "POST:/api/projects/:id/git-push": async (req, params) => {
+    const projectId = params[0];
+    if (!projectId) return json({ error: "Project ID required" }, 400);
+
+    try {
+      const { message } = await req.json() as { message: string };
+      if (!message) return json({ error: "Commit message is required" }, 400);
+
+      const config = await getProjectConfig(projectId);
+      if (!config) return json({ error: "Project not found" }, 404);
+
+      const settings = loadGitHubSettings();
+      const token = settings.token || undefined;
+
+      const result = pushChanges(config.sectionsDir, message, token);
+      return result.success
+        ? json({ success: true })
+        : json({ error: result.error || "Push failed" }, 500);
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 500);
     }

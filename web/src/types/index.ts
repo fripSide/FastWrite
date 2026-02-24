@@ -2,10 +2,12 @@
 export interface Project {
   id: string;
   name: string;
-  type: 'local';
+  type: 'local' | 'github';
   localPath: string;
   createdAt: string;
   status: 'active' | 'archived';
+  githubUrl?: string;
+  githubBranch?: string;
 }
 
 export interface SelectedProject {

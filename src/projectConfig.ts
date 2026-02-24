@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, cpSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import type { Project, ProjectConfig, SectionNode } from '../web/src/types';
 
@@ -8,10 +8,12 @@ const PROJECTS_FILE = join(PROJS_DIR, 'projects.json');
 export interface ProjectMetadata {
   id: string;
   name: string;
-  type: 'local';
+  type: 'local' | 'github';
   localPath: string;
   createdAt: string;
   status: 'active' | 'archived';
+  githubUrl?: string;
+  githubBranch?: string;
 }
 
 function generateId(): string {
@@ -39,31 +41,51 @@ async function saveProjects(projects: ProjectMetadata[]): Promise<void> {
   writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2), 'utf-8');
 }
 
-export async function createProject(name: string, localPath: string, mainFileOverride?: string): Promise<ProjectMetadata> {
+export interface CreateProjectOptions {
+  name: string;
+  localPath: string;
+  mainFileOverride?: string;
+  copyFiles?: boolean;
+  projectType?: 'local' | 'github';
+  githubUrl?: string;
+  githubBranch?: string;
+}
+
+/**
+ * Get the directory where project files are stored (copied files).
+ */
+export function getProjectFilesDir(projectId: string): string {
+  return join(PROJS_DIR, projectId, 'files');
+}
+
+export async function createProject(options: CreateProjectOptions): Promise<ProjectMetadata> {
+  const { name, localPath, mainFileOverride, copyFiles = false, projectType = 'local', githubUrl, githubBranch } = options;
   const projects = await loadProjects();
 
   const normalizedPath = localPath.replace(/\/+$/, '');
   const projectName = name || basename(normalizedPath);
 
-  const existing = projects.find(p => p.localPath.replace(/\/+$/, '') === normalizedPath);
-  if (existing) {
-    if (existing.name !== projectName) {
-      existing.name = projectName;
-      await saveProjects(projects);
-    }
-    // Update mainFile in config if user specified one
-    if (mainFileOverride) {
-      const configPath = join(PROJS_DIR, existing.id, 'config.json');
-      if (existsSync(configPath)) {
-        try {
-          const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-          config.mainFile = mainFileOverride;
-          writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-        } catch { /* ignore */ }
+  // For non-copy mode, check for existing project with same path
+  if (!copyFiles) {
+    const existing = projects.find(p => p.localPath.replace(/\/+$/, '') === normalizedPath);
+    if (existing) {
+      if (existing.name !== projectName) {
+        existing.name = projectName;
+        await saveProjects(projects);
       }
+      if (mainFileOverride) {
+        const configPath = join(PROJS_DIR, existing.id, 'config.json');
+        if (existsSync(configPath)) {
+          try {
+            const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+            config.mainFile = mainFileOverride;
+            writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+          } catch { /* ignore */ }
+        }
+      }
+      await setActiveProject(existing.id);
+      return existing;
     }
-    await setActiveProject(existing.id);
-    return existing;
   }
 
   if (!existsSync(localPath)) {
@@ -79,29 +101,38 @@ export async function createProject(name: string, localPath: string, mainFileOve
   const projectDir = join(PROJS_DIR, projectId);
   const backupsDir = join(projectDir, 'backups');
   const aiCacheDir = join(projectDir, 'ai-cache');
+  const filesDir = join(projectDir, 'files');
 
   mkdirSync(projectDir, { recursive: true });
   mkdirSync(backupsDir, { recursive: true });
   mkdirSync(aiCacheDir, { recursive: true });
 
+  // Determine the actual sectionsDir
+  let sectionsDir = normalizedPath;
+
+  if (copyFiles) {
+    // Copy all files from source to project files directory
+    cpSync(normalizedPath, filesDir, { recursive: true });
+    sectionsDir = filesDir;
+    console.log(`Copied project files from ${normalizedPath} to ${filesDir}`);
+  }
+
   // Use user-specified main file if provided, otherwise auto-detect
   let mainFile: string | undefined = mainFileOverride;
 
   if (!mainFile) {
-    const files = readdirSync(localPath);
+    const files = readdirSync(sectionsDir);
     const texFiles = files.filter(f => f.endsWith('.tex'));
 
-    // Auto-detect main file: find tex file with \documentclass in root directory
     for (const f of texFiles) {
       try {
-        const content = readFileSync(join(localPath, f), 'utf-8');
+        const content = readFileSync(join(sectionsDir, f), 'utf-8');
         if (content.includes('\\documentclass')) {
           mainFile = f;
           break;
         }
       } catch { /* ignore read errors */ }
     }
-    // Fallback to common filenames if no documentclass found
     if (!mainFile) {
       mainFile = texFiles.find(f => ['main.tex', 'paper.tex', 'document.tex'].includes(basename(f)));
     }
@@ -109,7 +140,7 @@ export async function createProject(name: string, localPath: string, mainFileOve
 
   const config: ProjectConfig = {
     projectId,
-    sectionsDir: normalizedPath,
+    sectionsDir,
     backupsDir,
     bibFiles: [],
     mainFile
@@ -120,10 +151,12 @@ export async function createProject(name: string, localPath: string, mainFileOve
   const metadata: ProjectMetadata = {
     id: projectId,
     name: projectName,
-    type: 'local',
-    localPath: normalizedPath,
+    type: projectType,
+    localPath: sectionsDir,
     createdAt: new Date().toISOString(),
-    status: 'active'
+    status: 'active',
+    ...(githubUrl && { githubUrl }),
+    ...(githubBranch && { githubBranch }),
   };
 
   // Deactivate other projects
