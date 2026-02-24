@@ -1,0 +1,370 @@
+{
+  "/texlive/texmf-dist/tex/generic/xkeyval/keyval.tex": {
+    "localPath": "local-packages/extracted/tex/generic/xkeyval/keyval.tex",
+    "size": 2793
+  },
+  "/texlive/texmf-dist/tex/generic/xkeyval/pst-xkey.tex": {
+    "localPath": "local-packages/extracted/tex/generic/xkeyval/pst-xkey.tex",
+    "size": 2437
+  },
+  "/texlive/texmf-dist/tex/generic/xkeyval/xkeyval.tex": {
+    "localPath": "local-packages/extracted/tex/generic/xkeyval/xkeyval.tex",
+    "size": 19299
+  },
+  "/texlive/texmf-dist/tex/generic/xkeyval/xkvtxhdr.tex": {
+    "localPath": "local-packages/extracted/tex/generic/xkeyval/xkvtxhdr.tex",
+    "size": 2924
+  },
+  "/texlive/texmf-dist/tex/generic/xkeyval/xkvutils.tex": {
+    "localPath": "local-packages/extracted/tex/generic/xkeyval/xkvutils.tex",
+    "size": 7787
+  },
+  "/texlive/texmf-dist/tex/latex/algorithmicx/algc.sty": {
+    "localPath": "local-packages/extracted/tex/latex/algorithmicx/algc.sty",
+    "size": 1280
+  },
+  "/texlive/texmf-dist/tex/latex/algorithmicx/algcompatible.sty": {
+    "localPath": "local-packages/extracted/tex/latex/algorithmicx/algcompatible.sty",
+    "size": 2994
+  },
+  "/texlive/texmf-dist/tex/latex/algorithmicx/algmatlab.sty": {
+    "localPath": "local-packages/extracted/tex/latex/algorithmicx/algmatlab.sty",
+    "size": 2217
+  },
+  "/texlive/texmf-dist/tex/latex/algorithmicx/algorithmicx.sty": {
+    "localPath": "local-packages/extracted/tex/latex/algorithmicx/algorithmicx.sty",
+    "size": 26750
+  },
+  "/texlive/texmf-dist/tex/latex/algorithmicx/algpascal.sty": {
+    "localPath": "local-packages/extracted/tex/latex/algorithmicx/algpascal.sty",
+    "size": 1323
+  },
+  "/texlive/texmf-dist/tex/latex/algorithmicx/algpseudocode.sty": {
+    "localPath": "local-packages/extracted/tex/latex/algorithmicx/algpseudocode.sty",
+    "size": 3457
+  },
+  "/texlive/texmf-dist/tex/latex/algorithms/algorithm.sty": {
+    "localPath": "local-packages/extracted/tex/latex/algorithms/algorithm.sty",
+    "size": 3249
+  },
+  "/texlive/texmf-dist/tex/latex/algorithms/algorithmic.sty": {
+    "localPath": "local-packages/extracted/tex/latex/algorithms/algorithmic.sty",
+    "size": 9318
+  },
+  "/texlive/texmf-dist/tex/latex/booktabs/booktabs.sty": {
+    "localPath": "local-packages/extracted/tex/latex/booktabs/booktabs.sty",
+    "size": 6078
+  },
+  "/texlive/texmf-dist/tex/latex/float/float.sty": {
+    "localPath": "local-packages/extracted/tex/latex/float/float.sty",
+    "size": 6749
+  },
+  "/texlive/texmf-dist/tex/latex/graphics/keyval.sty": {
+    "localPath": "local-packages/extracted/tex/latex/graphics/keyval.sty",
+    "size": 2671
+  },
+  "/texlive/texmf-dist/tex/latex/lipsum/cicero.ltd.tex": {
+    "localPath": "local-packages/extracted/tex/latex/lipsum/cicero.ltd.tex",
+    "size": 140264
+  },
+  "/texlive/texmf-dist/tex/latex/lipsum/lipsum-cs.ltd.tex": {
+    "localPath": "local-packages/extracted/tex/latex/lipsum/lipsum-cs.ltd.tex",
+    "size": 102329
+  },
+  "/texlive/texmf-dist/tex/latex/lipsum/lipsum.ltd.tex": {
+    "localPath": "local-packages/extracted/tex/latex/lipsum/lipsum.ltd.tex",
+    "size": 95525
+  },
+  "/texlive/texmf-dist/tex/latex/lipsum/lipsum.sty": {
+    "localPath": "local-packages/extracted/tex/latex/lipsum/lipsum.sty",
+    "size": 14690
+  },
+  "/texlive/texmf-dist/tex/latex/listings/listings-acm.prf": {
+    "localPath": "local-packages/extracted/tex/latex/listings/listings-acm.prf",
+    "size": 1858
+  },
+  "/texlive/texmf-dist/tex/latex/listings/listings-bash.prf": {
+    "localPath": "local-packages/extracted/tex/latex/listings/listings-bash.prf",
+    "size": 2102
+  },
+  "/texlive/texmf-dist/tex/latex/listings/listings-fortran.prf": {
+    "localPath": "local-packages/extracted/tex/latex/listings/listings-fortran.prf",
+    "size": 2120
+  },
+  "/texlive/texmf-dist/tex/latex/listings/listings-hansl.prf": {
+    "localPath": "local-packages/extracted/tex/latex/listings/listings-hansl.prf",
+    "size": 1613
+  },
+  "/texlive/texmf-dist/tex/latex/listings/listings-lua.prf": {
+    "localPath": "local-packages/extracted/tex/latex/listings/listings-lua.prf",
+    "size": 1465
+  },
+  "/texlive/texmf-dist/tex/latex/listings/listings-python.prf": {
+    "localPath": "local-packages/extracted/tex/latex/listings/listings-python.prf",
+    "size": 2030
+  },
+  "/texlive/texmf-dist/tex/latex/listings/listings-rexx.prf": {
+    "localPath": "local-packages/extracted/tex/latex/listings/listings-rexx.prf",
+    "size": 1748
+  },
+  "/texlive/texmf-dist/tex/latex/listings/listings-riscv.prf": {
+    "localPath": "local-packages/extracted/tex/latex/listings/listings-riscv.prf",
+    "size": 1384
+  },
+  "/texlive/texmf-dist/tex/latex/listings/listings.cfg": {
+    "localPath": "local-packages/extracted/tex/latex/listings/listings.cfg",
+    "size": 1865
+  },
+  "/texlive/texmf-dist/tex/latex/listings/listings.sty": {
+    "localPath": "local-packages/extracted/tex/latex/listings/listings.sty",
+    "size": 81627
+  },
+  "/texlive/texmf-dist/tex/latex/listings/lstdoc.sty": {
+    "localPath": "local-packages/extracted/tex/latex/listings/lstdoc.sty",
+    "size": 15127
+  },
+  "/texlive/texmf-dist/tex/latex/listings/lstlang1.sty": {
+    "localPath": "local-packages/extracted/tex/latex/listings/lstlang1.sty",
+    "size": 206518
+  },
+  "/texlive/texmf-dist/tex/latex/listings/lstlang2.sty": {
+    "localPath": "local-packages/extracted/tex/latex/listings/lstlang2.sty",
+    "size": 106030
+  },
+  "/texlive/texmf-dist/tex/latex/listings/lstlang3.sty": {
+    "localPath": "local-packages/extracted/tex/latex/listings/lstlang3.sty",
+    "size": 92877
+  },
+  "/texlive/texmf-dist/tex/latex/tools/afterpage.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/afterpage.sty",
+    "size": 4085
+  },
+  "/texlive/texmf-dist/tex/latex/tools/array-2016-10-06.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/array-2016-10-06.sty",
+    "size": 11849
+  },
+  "/texlive/texmf-dist/tex/latex/tools/array-2020-02-10.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/array-2020-02-10.sty",
+    "size": 12535
+  },
+  "/texlive/texmf-dist/tex/latex/tools/array-2023-11-01.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/array-2023-11-01.sty",
+    "size": 12587
+  },
+  "/texlive/texmf-dist/tex/latex/tools/array.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/array.sty",
+    "size": 15651
+  },
+  "/texlive/texmf-dist/tex/latex/tools/bm.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/bm.sty",
+    "size": 13389
+  },
+  "/texlive/texmf-dist/tex/latex/tools/calc.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/calc.sty",
+    "size": 10374
+  },
+  "/texlive/texmf-dist/tex/latex/tools/dcolumn.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/dcolumn.sty",
+    "size": 2758
+  },
+  "/texlive/texmf-dist/tex/latex/tools/delarray.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/delarray.sty",
+    "size": 2157
+  },
+  "/texlive/texmf-dist/tex/latex/tools/e.tex": {
+    "localPath": "local-packages/extracted/tex/latex/tools/e.tex",
+    "size": 1417
+  },
+  "/texlive/texmf-dist/tex/latex/tools/enumerate.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/enumerate.sty",
+    "size": 3468
+  },
+  "/texlive/texmf-dist/tex/latex/tools/fontsmpl.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/fontsmpl.sty",
+    "size": 6346
+  },
+  "/texlive/texmf-dist/tex/latex/tools/fontsmpl.tex": {
+    "localPath": "local-packages/extracted/tex/latex/tools/fontsmpl.tex",
+    "size": 2486
+  },
+  "/texlive/texmf-dist/tex/latex/tools/ftnright.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/ftnright.sty",
+    "size": 6144
+  },
+  "/texlive/texmf-dist/tex/latex/tools/h.tex": {
+    "localPath": "local-packages/extracted/tex/latex/tools/h.tex",
+    "size": 1610
+  },
+  "/texlive/texmf-dist/tex/latex/tools/hhline.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/hhline.sty",
+    "size": 3831
+  },
+  "/texlive/texmf-dist/tex/latex/tools/indentfirst.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/indentfirst.sty",
+    "size": 1618
+  },
+  "/texlive/texmf-dist/tex/latex/tools/l3sys-query.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/l3sys-query.sty",
+    "size": 4157
+  },
+  "/texlive/texmf-dist/tex/latex/tools/layout.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/layout.sty",
+    "size": 14907
+  },
+  "/texlive/texmf-dist/tex/latex/tools/longtable-2020-01-07.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/longtable-2020-01-07.sty",
+    "size": 12282
+  },
+  "/texlive/texmf-dist/tex/latex/tools/longtable.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/longtable.sty",
+    "size": 16014
+  },
+  "/texlive/texmf-dist/tex/latex/tools/multicol-2017-04-11.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/multicol-2017-04-11.sty",
+    "size": 29812
+  },
+  "/texlive/texmf-dist/tex/latex/tools/multicol-2019-10-01.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/multicol-2019-10-01.sty",
+    "size": 31467
+  },
+  "/texlive/texmf-dist/tex/latex/tools/multicol-2024-05-23.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/multicol-2024-05-23.sty",
+    "size": 32621
+  },
+  "/texlive/texmf-dist/tex/latex/tools/multicol.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/multicol.sty",
+    "size": 33142
+  },
+  "/texlive/texmf-dist/tex/latex/tools/q.tex": {
+    "localPath": "local-packages/extracted/tex/latex/tools/q.tex",
+    "size": 1411
+  },
+  "/texlive/texmf-dist/tex/latex/tools/r.tex": {
+    "localPath": "local-packages/extracted/tex/latex/tools/r.tex",
+    "size": 1413
+  },
+  "/texlive/texmf-dist/tex/latex/tools/rawfonts.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/rawfonts.sty",
+    "size": 6735
+  },
+  "/texlive/texmf-dist/tex/latex/tools/s.tex": {
+    "localPath": "local-packages/extracted/tex/latex/tools/s.tex",
+    "size": 1412
+  },
+  "/texlive/texmf-dist/tex/latex/tools/shellesc.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/shellesc.sty",
+    "size": 4121
+  },
+  "/texlive/texmf-dist/tex/latex/tools/showkeys-2014-10-28.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/showkeys-2014-10-28.sty",
+    "size": 8780
+  },
+  "/texlive/texmf-dist/tex/latex/tools/showkeys.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/showkeys.sty",
+    "size": 8792
+  },
+  "/texlive/texmf-dist/tex/latex/tools/somedefs.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/somedefs.sty",
+    "size": 2485
+  },
+  "/texlive/texmf-dist/tex/latex/tools/tabularx.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/tabularx.sty",
+    "size": 7243
+  },
+  "/texlive/texmf-dist/tex/latex/tools/thb.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/thb.sty",
+    "size": 2039
+  },
+  "/texlive/texmf-dist/tex/latex/tools/thc.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/thc.sty",
+    "size": 1906
+  },
+  "/texlive/texmf-dist/tex/latex/tools/thcb.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/thcb.sty",
+    "size": 2048
+  },
+  "/texlive/texmf-dist/tex/latex/tools/theorem.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/theorem.sty",
+    "size": 4956
+  },
+  "/texlive/texmf-dist/tex/latex/tools/thm.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/thm.sty",
+    "size": 1916
+  },
+  "/texlive/texmf-dist/tex/latex/tools/thmb.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/thmb.sty",
+    "size": 2077
+  },
+  "/texlive/texmf-dist/tex/latex/tools/thp.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/thp.sty",
+    "size": 1908
+  },
+  "/texlive/texmf-dist/tex/latex/tools/trace.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/trace.sty",
+    "size": 4301
+  },
+  "/texlive/texmf-dist/tex/latex/tools/varioref-2016-02-16.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/varioref-2016-02-16.sty",
+    "size": 34011
+  },
+  "/texlive/texmf-dist/tex/latex/tools/varioref.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/varioref.sty",
+    "size": 44048
+  },
+  "/texlive/texmf-dist/tex/latex/tools/verbatim.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/verbatim.sty",
+    "size": 7532
+  },
+  "/texlive/texmf-dist/tex/latex/tools/verbtest.tex": {
+    "localPath": "local-packages/extracted/tex/latex/tools/verbtest.tex",
+    "size": 5280
+  },
+  "/texlive/texmf-dist/tex/latex/tools/x.tex": {
+    "localPath": "local-packages/extracted/tex/latex/tools/x.tex",
+    "size": 1417
+  },
+  "/texlive/texmf-dist/tex/latex/tools/xr-2023-07-04.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/xr-2023-07-04.sty",
+    "size": 2749
+  },
+  "/texlive/texmf-dist/tex/latex/tools/xr.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/xr.sty",
+    "size": 3650
+  },
+  "/texlive/texmf-dist/tex/latex/tools/xspace.sty": {
+    "localPath": "local-packages/extracted/tex/latex/tools/xspace.sty",
+    "size": 4545
+  },
+  "/texlive/texmf-dist/tex/latex/xcolor/svgnam.def": {
+    "localPath": "local-packages/extracted/tex/latex/xcolor/svgnam.def",
+    "size": 4705
+  },
+  "/texlive/texmf-dist/tex/latex/xcolor/x11nam.def": {
+    "localPath": "local-packages/extracted/tex/latex/xcolor/x11nam.def",
+    "size": 9125
+  },
+  "/texlive/texmf-dist/tex/latex/xcolor/xcolor-2022-06-12.sty": {
+    "localPath": "local-packages/extracted/tex/latex/xcolor/xcolor-2022-06-12.sty",
+    "size": 56154
+  },
+  "/texlive/texmf-dist/tex/latex/xcolor/xcolor.sty": {
+    "localPath": "local-packages/extracted/tex/latex/xcolor/xcolor.sty",
+    "size": 55384
+  },
+  "/texlive/texmf-dist/tex/latex/xkeyval/pst-xkey.sty": {
+    "localPath": "local-packages/extracted/tex/latex/xkeyval/pst-xkey.sty",
+    "size": 1762
+  },
+  "/texlive/texmf-dist/tex/latex/xkeyval/xkeyval.sty": {
+    "localPath": "local-packages/extracted/tex/latex/xkeyval/xkeyval.sty",
+    "size": 5006
+  },
+  "/texlive/texmf-dist/tex/latex/xkeyval/xkvltxp.sty": {
+    "localPath": "local-packages/extracted/tex/latex/xkeyval/xkvltxp.sty",
+    "size": 3536
+  },
+  "/texlive/texmf-dist/tex/latex/xkeyval/xkvview.sty": {
+    "localPath": "local-packages/extracted/tex/latex/xkeyval/xkvview.sty",
+    "size": 6984
+  }
+}

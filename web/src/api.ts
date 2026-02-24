@@ -22,13 +22,13 @@ export const api = {
   // Projects
   getProjects: () => fetchJson<Project[]>('/api/projects'),
 
-  getProjectConfig: (projectId: string) => fetchJson<import('./types').ProjectConfig>(`/api/projects/${projectId}/config`),
+  getProjectConfig: (projectId: string) => fetchJson<import('./types').ProjectConfig>(`/api/projects/${projectId}/config?t=${Date.now()}`),
 
   saveProjectConfig: (projectId: string, config: Partial<import('./types').ProjectConfig>) =>
     postJson<import('./types').ProjectConfig>(`/api/projects/${projectId}/config`, config),
 
-  importLocalProject: (path: string, name: string) =>
-    postJson<Project>('/api/projects/import-local', { path, name }),
+  importLocalProject: (path: string, name: string, mainFile?: string) =>
+    postJson<Project>('/api/projects/import-local', { path, name, mainFile }),
 
   importGitHubProject: (url: string, branch?: string) =>
     postJson<{ success: boolean; path: string; name: string }>('/api/projects/import-github', { url, branch }),

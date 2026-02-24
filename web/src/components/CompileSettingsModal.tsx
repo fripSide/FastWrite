@@ -175,12 +175,15 @@ const CompileSettingsModal: React.FC<CompileSettingsModalProps> = ({
 									onChange={(e) => setConfig({ ...config, compiler: e.target.value as any })}
 									className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
 								>
+									<option value="browser-wasm">Browser (WASM) — No Install Required</option>
 									<option value="pdflatex">pdfLaTeX (Standard)</option>
 									<option value="xelatex">XeLaTeX (Better Font Support)</option>
 									<option value="lualatex">LuaLaTeX (Modern)</option>
 								</select>
 								<p className="text-[10px] text-slate-400">
-									Select the engine used to compile your LaTeX document.
+									{config.compiler === 'browser-wasm'
+										? 'Compiles entirely in the browser via WebAssembly. No local LaTeX installation needed. Note: Supports basic packages only.'
+										: 'Select the engine used to compile your LaTeX document.'}
 								</p>
 							</div>
 

@@ -12,6 +12,7 @@ export interface SelectedProject {
   project: Project;
   activeFileId?: string;
   config?: ProjectConfig;
+  files?: FileNode[];
 }
 
 export interface ProjectConfig {
@@ -20,7 +21,7 @@ export interface ProjectConfig {
   backupsDir: string;
   bibFiles: string[];
   mainFile?: string;
-  compiler?: 'pdflatex' | 'xelatex' | 'lualatex';
+  compiler?: 'pdflatex' | 'xelatex' | 'lualatex' | 'browser-wasm';
 }
 
 // File Types
@@ -66,6 +67,8 @@ export interface TextItem {
   aiMode?: AIMode;
   aiTimestamp?: string;
   thoughts?: string;
+  level?: number;
+  children?: TextItem[];
 }
 
 // Diff Types

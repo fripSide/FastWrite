@@ -434,6 +434,12 @@ function App() {
               mainTexPath={mainTexPath}
               onSyncToSource={handleSyncToSource}
               scrollTo={pdfScrollTarget}
+              compilerMode={projectConfig?.compiler}
+              onCompilerChange={() => {
+                api.getProjectConfig(selectedProject.project.id).then(config => {
+                  if (config) setProjectConfig(config);
+                });
+              }}
             />
           </div>
         )}

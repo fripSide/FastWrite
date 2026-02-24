@@ -4,19 +4,25 @@
 // @ts-ignore - Bun file embed
 import indexHtml from "../web/dist/index.html" with { type: "file" };
 // @ts-ignore - Bun file embed  
-import indexCss from "../web/dist/assets/index-CzLmtdS5.css" with { type: "file" };
+import indexCss from "../web/dist/assets/index-BEauJt1E.css" with { type: "file" };
 // @ts-ignore - Bun file embed
-import indexJs from "../web/dist/assets/index-ZIHSvWh0.js" with { type: "file" };
+import indexJs from "../web/dist/assets/index-BnMvo7CU.js" with { type: "file" };
 // @ts-ignore - Bun file embed
-import viteExternal from "../web/dist/assets/__vite-browser-external-BIHI7g3E.js" with { type: "file" };
+import workerJs from "../web/dist/assets/worker-BH7JnVKG.js" with { type: "file" };
+// @ts-ignore - Bun file embed
+import opfsJs from "../web/dist/assets/OPFSBackend-gSESiBnj.js" with { type: "file" };
+// @ts-ignore - Bun file embed
+import blakeWasm from "../web/dist/assets/blake3_js_bg-BuxyNMCA.wasm" with { type: "file" };
 
 // Bun embeds return file paths that work with Bun.file()
 export const EMBEDDED_ASSETS: Record<string, any> = {
 	"/": indexHtml,
 	"/index.html": indexHtml,
-	"/assets/index-CzLmtdS5.css": indexCss,
-	"/assets/index-ZIHSvWh0.js": indexJs,
-	"/assets/__vite-browser-external-BIHI7g3E.js": viteExternal,
+	"/assets/index-BEauJt1E.css": indexCss,
+	"/assets/index-BnMvo7CU.js": indexJs,
+	"/assets/worker-BH7JnVKG.js": workerJs,
+	"/assets/OPFSBackend-gSESiBnj.js": opfsJs,
+	"/assets/blake3_js_bg-BuxyNMCA.wasm": blakeWasm,
 };
 
 export function isEmbeddedAsset(path: string): boolean {

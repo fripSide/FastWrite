@@ -39,7 +39,7 @@ async function saveProjects(projects: ProjectMetadata[]): Promise<void> {
   writeFileSync(PROJECTS_FILE, JSON.stringify(projects, null, 2), 'utf-8');
 }
 
-export async function createProject(name: string, localPath: string): Promise<ProjectMetadata> {
+export async function createProject(name: string, localPath: string, mainFileOverride?: string): Promise<ProjectMetadata> {
   const projects = await loadProjects();
 
   const normalizedPath = localPath.replace(/\/+$/, '');
@@ -50,6 +50,17 @@ export async function createProject(name: string, localPath: string): Promise<Pr
     if (existing.name !== projectName) {
       existing.name = projectName;
       await saveProjects(projects);
+    }
+    // Update mainFile in config if user specified one
+    if (mainFileOverride) {
+      const configPath = join(PROJS_DIR, existing.id, 'config.json');
+      if (existsSync(configPath)) {
+        try {
+          const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+          config.mainFile = mainFileOverride;
+          writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+        } catch { /* ignore */ }
+      }
     }
     await setActiveProject(existing.id);
     return existing;
@@ -73,23 +84,27 @@ export async function createProject(name: string, localPath: string): Promise<Pr
   mkdirSync(backupsDir, { recursive: true });
   mkdirSync(aiCacheDir, { recursive: true });
 
-  const files = readdirSync(localPath);
-  const texFiles = files.filter(f => f.endsWith('.tex'));
+  // Use user-specified main file if provided, otherwise auto-detect
+  let mainFile: string | undefined = mainFileOverride;
 
-  // Auto-detect main file: find tex file with \documentclass in root directory
-  let mainFile: string | undefined;
-  for (const f of texFiles) {
-    try {
-      const content = readFileSync(join(localPath, f), 'utf-8');
-      if (content.includes('\\documentclass')) {
-        mainFile = f;
-        break;
-      }
-    } catch { /* ignore read errors */ }
-  }
-  // Fallback to common filenames if no documentclass found
   if (!mainFile) {
-    mainFile = texFiles.find(f => ['main.tex', 'paper.tex', 'document.tex'].includes(basename(f)));
+    const files = readdirSync(localPath);
+    const texFiles = files.filter(f => f.endsWith('.tex'));
+
+    // Auto-detect main file: find tex file with \documentclass in root directory
+    for (const f of texFiles) {
+      try {
+        const content = readFileSync(join(localPath, f), 'utf-8');
+        if (content.includes('\\documentclass')) {
+          mainFile = f;
+          break;
+        }
+      } catch { /* ignore read errors */ }
+    }
+    // Fallback to common filenames if no documentclass found
+    if (!mainFile) {
+      mainFile = texFiles.find(f => ['main.tex', 'paper.tex', 'document.tex'].includes(basename(f)));
+    }
   }
 
   const config: ProjectConfig = {

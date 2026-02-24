@@ -1,1 +1,20 @@
-{}
+{
+  "/Users/fripside/Dev/FastWrite/demo/latex-paper1/sections/1-introduction.tex:refine": [
+    {
+      "id": "1771769160348",
+      "role": "ai",
+      "content": "Here is the suggested revision.",
+      "suggestion": "\\section{Introduction}\n\nThe rise of generative AI has transformed academic writing; however, for researchers in computer systems and security, this transition remains challenging.",
+      "model": "qwen3-max",
+      "timestamp": "2026-02-22T14:06:00.347Z"
+    },
+    {
+      "id": "1771769209079",
+      "role": "ai",
+      "content": "Here is the suggested revision.",
+      "suggestion": "\\subsection{The Challenge}\n\nTop-tier systems and security venues—such as IEEE S\\&P, OSDI, USENIX Security, and CCS—demand rigorous logical flow, an authoritative tone, and precise technical terminology. Yet existing collaborative writing platforms like Overleaf lack integration with domain-aware AI assistants capable of enforcing these standards. As a result, authors face a stark trade-off: sacrificing writing quality for collaborative efficiency or vice versa.\n\nGeneric large language models (LLMs) do not resolve this tension. They often produce verbose or hallucinated content, imposing substantial manual verification costs. Moreover, uploading unpublished drafts to external, cloud-hosted LLM providers introduces unacceptable risks to data privacy and sovereignty. These challenges call for a secure, context-aware assistant that integrates directly into the LaTeX workflow—ensuring technical accuracy and structural rigor while preserving confidentiality.",
+      "model": "qwen3-max",
+      "timestamp": "2026-02-22T14:06:49.078Z"
+    }
+  ]
+}

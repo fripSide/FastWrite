@@ -1,0 +1,18 @@
+name algorithms
+category Package
+revision 77677
+shortdesc A suite of tools for typesetting algorithms in pseudo-code
+relocated 1
+longdesc Consists of two environments: algorithm and algorithmic. The
+longdesc algorithm package defines a floating algorithm environment
+longdesc designed to work with the algorithmic style. Within an
+longdesc algorithmic environment a number of commands for typesetting
+longdesc popular algorithmic constructs are available.
+runfiles size=4
+ RELOC/tex/latex/algorithms/algorithm.sty
+ RELOC/tex/latex/algorithms/algorithmic.sty
+catalogue-also alg
+catalogue-ctan /macros/latex/contrib/algorithms
+catalogue-license lgpl2.1
+catalogue-topics pseudocode tagged-pdf-incompatible
+catalogue-version 0.1

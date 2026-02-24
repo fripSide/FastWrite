@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Folder, FolderOpen, ChevronRight, ChevronDown, FileText, Plus, Trash2, Settings, RefreshCw, Check } from 'lucide-react';
+import { Folder, FolderOpen, ChevronRight, ChevronDown, FileText, Image as ImageIcon, Trash2, Settings, RefreshCw, Check, X, Edit2, FilePlus, FolderPlus, ExternalLink, FileCheck } from 'lucide-react';
 import type { Project, FileNode, SelectedProject, SectionNode } from '../types';
 import { api } from '../api';
 import SystemPromptModal from './SystemPromptModal';
@@ -31,6 +31,10 @@ const Sidebar: React.FC<SidebarProps> = ({
   const [isOutlineCollapsed, setIsOutlineCollapsed] = useState(false);
   const [outlineHeight, setOutlineHeight] = useState(200);
   const [isOutlineResizing, setIsOutlineResizing] = useState(false);
+  const [previewImage, setPreviewImage] = useState<{ name: string; url: string } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: FileNode } | null>(null);
+  const [renamingNode, setRenamingNode] = useState<FileNode | null>(null);
+  const [renameValue, setRenameValue] = useState('');
 
   // Sidebar Resize Logic
   const [sidebarWidth, setSidebarWidth] = useState(320);
@@ -167,14 +171,18 @@ const Sidebar: React.FC<SidebarProps> = ({
       };
 
       // Find parent
-      while (stack.length > 0 && stack[stack.length - 1].level >= newNode.level) {
+      while (stack.length > 0 && stack[stack.length - 1]!.level >= newNode.level) {
         stack.pop();
       }
 
       if (stack.length === 0) {
         root.push(newNode);
       } else {
-        stack[stack.length - 1].node.children.push(newNode);
+        const parent = stack[stack.length - 1];
+        if (parent) {
+          if (!parent.node.children) parent.node.children = [];
+          parent.node.children.push(newNode);
+        }
       }
 
       stack.push({ node: newNode, level: newNode.level });
@@ -214,20 +222,151 @@ const Sidebar: React.FC<SidebarProps> = ({
     }
   };
 
+  const IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.webp'];
+  const isImageFile = (name: string) => IMAGE_EXTS.some(ext => name.toLowerCase().endsWith(ext));
+
   const handleFileSelect = (file: FileNode): void => {
     onFileSelect?.(file);
   };
 
+  const handleImagePreview = (file: FileNode): void => {
+    if (!selectedProject) return;
+    const url = `/api/files/${encodeURIComponent(file.path)}?projectId=${encodeURIComponent(selectedProject.project.id)}&raw=true`;
+    setPreviewImage({ name: file.name, url });
+  };
+
+  const handleContextMenu = (e: React.MouseEvent, node: FileNode): void => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, node });
+  };
+
+  const handleDeleteFile = async (node: FileNode): Promise<void> => {
+    if (!selectedProject) return;
+    setContextMenu(null);
+    if (!confirm(`Delete "${node.name}"? This cannot be undone.`)) return;
+    try {
+      const res = await fetch(
+        `/api/files/${encodeURIComponent(node.path)}?projectId=${encodeURIComponent(selectedProject.project.id)}`,
+        { method: 'DELETE' }
+      );
+      if (res.ok) {
+        refreshProjectFiles();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to delete file');
+      }
+    } catch (error) {
+      console.error('Failed to delete file:', error);
+    }
+  };
+
+  const handleRenameStart = (node: FileNode): void => {
+    setContextMenu(null);
+    setRenamingNode(node);
+    setRenameValue(node.name);
+  };
+
+  const handleRenameSubmit = async (): Promise<void> => {
+    if (!renamingNode || !selectedProject || !renameValue.trim() || renameValue === renamingNode.name) {
+      setRenamingNode(null);
+      return;
+    }
+    try {
+      const res = await fetch(
+        `/api/files/${encodeURIComponent(renamingNode.path)}?projectId=${encodeURIComponent(selectedProject.project.id)}`,
+        { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ newName: renameValue.trim() }) }
+      );
+      if (res.ok) {
+        refreshProjectFiles();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to rename');
+      }
+    } catch (error) {
+      console.error('Failed to rename:', error);
+    }
+    setRenamingNode(null);
+  };
+
+  const handleOpenInFinder = async (node: FileNode): Promise<void> => {
+    setContextMenu(null);
+    try {
+      await fetch('/api/utils/open-in-finder', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: node.path })
+      });
+    } catch (error) {
+      console.error('Failed to open in Finder:', error);
+    }
+  };
+
+  const handleSetMainDocument = async (node: FileNode): Promise<void> => {
+    if (!selectedProject) return;
+    setContextMenu(null);
+    try {
+      await fetch(`/api/projects/${encodeURIComponent(selectedProject.project.id)}/config`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mainFile: node.name })
+      });
+    } catch (error) {
+      console.error('Failed to set main document:', error);
+    }
+  };
+
+  const handleNewFile = async (parentPath?: string): Promise<void> => {
+    setContextMenu(null);
+    const name = prompt('Enter file name (e.g. chapter.tex):');
+    if (!name?.trim()) return;
+    const parentDir = parentPath || selectedProject?.project.localPath;
+    if (!parentDir) return;
+    try {
+      const res = await fetch('/api/utils/create-file', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentDir, name: name.trim() })
+      });
+      if (res.ok) {
+        refreshProjectFiles();
+      } else {
+        const data = await res.json();
+        alert(data.error || 'Failed to create file');
+      }
+    } catch (error) {
+      console.error('Failed to create file:', error);
+    }
+  };
+
+  const handleNewFolder = async (parentPath?: string): Promise<void> => {
+    setContextMenu(null);
+    const name = prompt('Enter folder name:');
+    if (!name?.trim()) return;
+    const parentDir = parentPath || selectedProject?.project.localPath;
+    if (!parentDir) return;
+    // Create folder by creating a placeholder, then deleting it — or use mkdir
+    try {
+      const res = await fetch('/api/utils/create-file', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ parentDir: parentDir + '/' + name.trim(), name: '.gitkeep' })
+      });
+      if (res.ok) refreshProjectFiles();
+    } catch (error) {
+      console.error('Failed to create folder:', error);
+    }
+  };
+
   const renderFileTree = (nodes: FileNode[], level: number = 0): React.ReactNode => {
-    return nodes.map(node => (
+    return nodes.filter(node => node.name.toLowerCase() !== 'output').map(node => (
       <div key={node.id}>
         <div
           className={`flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-100 rounded-md ${selectedProject?.activeFileId === node.id ? 'bg-blue-100' : ''
             }`}
           style={{ paddingLeft: `${level * 16 + 12}px` }}
+          onContextMenu={(e) => handleContextMenu(e, node)}
           onClick={() => {
             if (node.type === 'folder') {
               toggleFolder(node.id);
+            } else if (isImageFile(node.name)) {
+              handleImagePreview(node);
             } else {
               handleFileSelect(node);
             }
@@ -244,13 +383,33 @@ const Sidebar: React.FC<SidebarProps> = ({
               </span>
               <Folder size={16} className="text-blue-500 shrink-0" />
             </>
+          ) : isImageFile(node.name) ? (
+            <>
+              <span className="w-3.5 shrink-0" />
+              <ImageIcon size={16} className="shrink-0 text-emerald-500" />
+            </>
           ) : (
             <>
               <span className="w-3.5 shrink-0" />
               <FileText size={16} className={`shrink-0 ${node.isLaTeX ? 'text-blue-500' : 'text-slate-500'}`} />
             </>
           )}
-          <span className="text-sm text-slate-700 truncate">{node.name}</span>
+          {renamingNode?.id === node.id ? (
+            <input
+              autoFocus
+              className="text-sm text-slate-700 bg-white border border-blue-400 rounded px-1 py-0.5 outline-none flex-1 min-w-0"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onBlur={handleRenameSubmit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleRenameSubmit();
+                if (e.key === 'Escape') setRenamingNode(null);
+              }}
+              onClick={(e) => e.stopPropagation()}
+            />
+          ) : (
+            <span className="text-sm text-slate-700 truncate">{node.name}</span>
+          )}
         </div>
         {node.type === 'folder' && expandedFolders.has(node.id) && node.children && (
           <>{renderFileTree(node.children, level + 1)}</>
@@ -531,6 +690,111 @@ const Sidebar: React.FC<SidebarProps> = ({
           </div>
         )}
       </div >
+
+      {/* Image Preview Overlay */}
+      {previewImage && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center backdrop-blur-sm"
+          onClick={() => setPreviewImage(null)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setPreviewImage(null); }}
+          tabIndex={0}
+          ref={(el) => el?.focus()}
+        >
+          <div className="relative max-w-[90vw] max-h-[90vh] flex flex-col items-center" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between w-full mb-3 px-1">
+              <span className="text-white/90 text-sm font-medium flex items-center gap-2">
+                <ImageIcon size={16} className="text-emerald-400" />
+                {previewImage.name}
+              </span>
+              <button
+                onClick={() => setPreviewImage(null)}
+                className="text-white/60 hover:text-white p-1 hover:bg-white/10 rounded-lg transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <img
+              src={previewImage.url}
+              alt={previewImage.name}
+              className="max-w-full max-h-[80vh] object-contain rounded-lg shadow-2xl bg-white/5"
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Context Menu */}
+      {contextMenu && (
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setContextMenu(null)} onContextMenu={(e) => { e.preventDefault(); setContextMenu(null); }} />
+          <div
+            className="fixed z-50 bg-white rounded-lg shadow-xl border border-slate-200 py-1 min-w-[180px]"
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+          >
+            {/* Rename */}
+            <button
+              onClick={() => handleRenameStart(contextMenu.node)}
+              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2.5 transition-colors"
+            >
+              <Edit2 size={14} className="text-slate-400" />
+              Rename
+            </button>
+
+            {/* Open in Finder */}
+            <button
+              onClick={() => handleOpenInFinder(contextMenu.node)}
+              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2.5 transition-colors"
+            >
+              <ExternalLink size={14} className="text-slate-400" />
+              Open in Folder
+            </button>
+
+            <div className="my-1 border-t border-slate-100" />
+
+            {/* Set as main document - only for .tex files */}
+            {contextMenu.node.name.endsWith('.tex') && (
+              <>
+                <button
+                  onClick={() => handleSetMainDocument(contextMenu.node)}
+                  className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2.5 transition-colors"
+                >
+                  <FileCheck size={14} className="text-slate-400" />
+                  Set as main document
+                </button>
+                <div className="my-1 border-t border-slate-100" />
+              </>
+            )}
+
+            {/* Delete */}
+            <button
+              onClick={() => handleDeleteFile(contextMenu.node)}
+              className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2.5 transition-colors"
+            >
+              <Trash2 size={14} />
+              Delete
+            </button>
+
+            <div className="my-1 border-t border-slate-100" />
+
+            {/* New file */}
+            <button
+              onClick={() => handleNewFile(contextMenu.node.type === 'folder' ? contextMenu.node.path : undefined)}
+              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2.5 transition-colors"
+            >
+              <FilePlus size={14} className="text-slate-400" />
+              New file
+            </button>
+
+            {/* New folder */}
+            <button
+              onClick={() => handleNewFolder(contextMenu.node.type === 'folder' ? contextMenu.node.path : undefined)}
+              className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 flex items-center gap-2.5 transition-colors"
+            >
+              <FolderPlus size={14} className="text-slate-400" />
+              New folder
+            </button>
+          </div>
+        </>
+      )}
 
       {/* System Prompt Modal */}
       {

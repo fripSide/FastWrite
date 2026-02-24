@@ -32,6 +32,8 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
   const [githubUrl, setGithubUrl] = useState('');
   const [duplicateInfo, setDuplicateInfo] = useState<DuplicateInfo | null>(null);
   const [githubBranch, setGithubBranch] = useState('main');
+  const [selectedMainFile, setSelectedMainFile] = useState<string | null>(null);
+  const [texFilesInDir, setTexFilesInDir] = useState<string[]>([]);
 
   // Helper to extract name from path
   const extractNameFromPath = (path: string): string => {
@@ -82,16 +84,50 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
 
   const handleBrowse = async () => {
     try {
-      const response = await fetch('/api/utils/browse-directory', {
-        method: 'POST'
-      });
-      const data = await response.json();
-      if (data.path) {
-        setDirectoryPath(data.path);
-        setError(null);
+      // Use native browser directory picker
+      const dirHandle = await (window as any).showDirectoryPicker({ mode: 'read' });
+
+      // Read .tex files from the selected directory
+      const texFiles: string[] = [];
+      for await (const entry of dirHandle.values()) {
+        if (entry.kind === 'file' && entry.name.endsWith('.tex')) {
+          texFiles.push(entry.name);
+        }
       }
-    } catch (err) {
-      console.error('Failed to open directory picker:', err);
+      texFiles.sort();
+      setTexFilesInDir(texFiles);
+
+      // Auto-detect main file: read each .tex to find \documentclass
+      let mainFile: string | null = null;
+      for (const name of texFiles) {
+        try {
+          const fileHandle = await dirHandle.getFileHandle(name);
+          const file = await fileHandle.getFile();
+          const text = await file.text();
+          if (text.includes('\\documentclass')) {
+            mainFile = name;
+            break;
+          }
+        } catch { /* ignore */ }
+      }
+      // Fallback to common names
+      if (!mainFile) {
+        mainFile = texFiles.find(f => ['main.tex', 'paper.tex', 'document.tex'].includes(f)) || texFiles[0] || null;
+      }
+      setSelectedMainFile(mainFile);
+
+      // Note: showDirectoryPicker only gives folder name, not full path.
+      // User needs to confirm/edit the full path in the input.
+      // Pre-fill with the folder name as a hint.
+      if (!directoryPath) {
+        setDirectoryPath(dirHandle.name);
+      }
+      setError(null);
+    } catch (err: any) {
+      // User cancelled picker - that's fine
+      if (err?.name !== 'AbortError') {
+        setError('Could not open directory picker');
+      }
     }
   };
 
@@ -147,7 +183,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
       let result: Project | null = null;
 
       if (importType === 'local') {
-        result = await api.importLocalProject(directoryPath, projectName);
+        result = await api.importLocalProject(directoryPath, projectName, selectedMainFile || undefined);
       } else if (importType === 'github') {
         if (!githubUrl.trim()) {
           setError('Please enter a GitHub URL');
@@ -299,8 +335,37 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
                   </button>
                 </div>
                 <p className="mt-1 text-xs text-slate-500">
-                  Select the LaTeX project directory using the system file browser. Project will be opened in-place.
+                  Enter the full path to your LaTeX project directory. Use Browse to detect .tex files.
                 </p>
+                {texFilesInDir.length > 0 && (
+                  <div className="mt-2 p-3 bg-slate-50 border border-slate-200 rounded-lg">
+                    <div className="text-xs font-medium text-slate-500 mb-1.5 flex items-center gap-1">
+                      <FileText size={12} className="text-orange-500" />
+                      Select main .tex file:
+                    </div>
+                    {texFilesInDir.map(f => (
+                      <label
+                        key={f}
+                        className={`flex items-center gap-2 px-2 py-1 rounded cursor-pointer transition-colors ${selectedMainFile === f
+                            ? 'bg-blue-50 border border-blue-200'
+                            : 'hover:bg-white border border-transparent'
+                          }`}
+                      >
+                        <input
+                          type="radio"
+                          name="mainTexFile"
+                          checked={selectedMainFile === f}
+                          onChange={() => setSelectedMainFile(f)}
+                          className="accent-blue-600"
+                        />
+                        <FileText size={14} className={selectedMainFile === f ? 'text-orange-500' : 'text-slate-400'} />
+                        <span className={`text-sm ${selectedMainFile === f ? 'font-medium text-slate-800' : 'text-slate-600'}`}>
+                          {f}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )}
               </div>
 
               <div>

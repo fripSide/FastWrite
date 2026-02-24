@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync, statSync, mkdirSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, writeFileSync, statSync, mkdirSync, unlinkSync, renameSync } from "node:fs";
 import { join, extname, basename, dirname } from "node:path";
 import { execSync } from "node:child_process";
 import type { FileNode } from "../web/src/types";
@@ -53,6 +53,7 @@ function scanDirectoryForTexFiles(dir: string, base: string = dir): FileNode[] {
       const relativePath = fullPath.replace(base + '/', '');
 
       if (entry.isDirectory()) {
+        if (entry.name.toLowerCase() === 'output') continue;
         const children = scanDirectoryForTexFiles(fullPath, base);
         if (children.length > 0) {
           nodes.push({
@@ -71,6 +72,18 @@ function scanDirectoryForTexFiles(dir: string, base: string = dir): FileNode[] {
           path: fullPath,
           isLaTeX: true
         });
+      } else {
+        // Include other project assets (images, bib, sty, cls, etc.)
+        const assetExts = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.svg', '.pdf', '.eps',
+          '.bib', '.bbl', '.sty', '.cls', '.bst'];
+        if (assetExts.some(ext => entry.name.toLowerCase().endsWith(ext))) {
+          nodes.push({
+            id: relativePath,
+            name: entry.name,
+            type: 'file',
+            path: fullPath,
+          });
+        }
       }
     }
   } catch (error) {
@@ -139,9 +152,9 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
 
   "POST:/api/projects/import-local": async (req) => {
     try {
-      const { path, name } = await req.json() as { path: string; name: string };
+      const { path, name, mainFile } = await req.json() as { path: string; name: string; mainFile?: string };
       if (!path || !name) return json({ error: "path and name are required" }, 400);
-      return json(await createProject(name, path));
+      return json(await createProject(name, path, mainFile));
     } catch (error) {
       return json({ error: error instanceof Error ? error.message : String(error) }, 500);
     }
@@ -221,8 +234,7 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     try {
       let command = "";
       if (process.platform === "darwin") {
-        // macOS: Use osascript with Finder for better compatibility
-        command = `osascript -e 'tell application "Finder"' -e 'activate' -e 'set selectedFolder to choose folder with prompt "Select LaTeX Project Directory"' -e 'return POSIX path of selectedFolder' -e 'end tell'`;
+        command = `osascript -e 'POSIX path of (choose folder with prompt "Select LaTeX Project Directory")'`;
       } else if (process.platform === "win32") {
         command = `powershell -command "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Select LaTeX Project Directory'; if($f.ShowDialog() -eq 'OK') { $f.SelectedPath }"`;
       } else {
@@ -231,9 +243,89 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
       const path = execSync(command, { encoding: 'utf-8', timeout: 60000 }).trim();
       return json({ path: path || null });
     } catch (err) {
-      // User cancelled or error
       console.log('Directory picker:', err instanceof Error ? err.message : 'cancelled');
       return json({ path: null });
+    }
+  },
+
+  "POST:/api/utils/list-directory": async (req) => {
+    try {
+      const { path: dirPath } = await req.json() as { path?: string };
+      const targetPath = dirPath || (process.platform === "win32" ? "C:\\" : "/");
+
+      if (!existsSync(targetPath)) return json({ error: "Path not found" }, 404);
+      if (!statSync(targetPath).isDirectory()) return json({ error: "Not a directory" }, 400);
+
+      const entries = readdirSync(targetPath, { withFileTypes: true });
+      const dirs: { name: string; path: string }[] = [];
+      const texFiles: { name: string; path: string; hasDocumentclass: boolean }[] = [];
+
+      for (const entry of entries) {
+        // Skip hidden entries
+        if (entry.name.startsWith('.')) continue;
+        if (entry.isDirectory()) {
+          dirs.push({ name: entry.name, path: join(targetPath, entry.name) });
+        } else if (entry.isFile() && entry.name.endsWith('.tex')) {
+          // Check if this tex file contains \documentclass (likely main file)
+          let hasDocumentclass = false;
+          try {
+            const content = readFileSync(join(targetPath, entry.name), 'utf-8');
+            hasDocumentclass = content.includes('\\documentclass');
+          } catch { /* ignore read errors */ }
+          texFiles.push({
+            name: entry.name,
+            path: join(targetPath, entry.name),
+            hasDocumentclass
+          });
+        }
+      }
+
+      // Sort alphabetically
+      dirs.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      texFiles.sort((a, b) => {
+        // Put documentclass files first
+        if (a.hasDocumentclass && !b.hasDocumentclass) return -1;
+        if (!a.hasDocumentclass && b.hasDocumentclass) return 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
+
+      return json({ path: targetPath, dirs, texFiles, hasTexFiles: texFiles.length > 0 });
+    } catch (err) {
+      return json({ error: err instanceof Error ? err.message : String(err) }, 500);
+    }
+  },
+
+  "POST:/api/utils/open-in-finder": async (req) => {
+    try {
+      const { path: targetPath } = await req.json() as { path: string };
+      if (!targetPath || !existsSync(targetPath)) return json({ error: "Path not found" }, 404);
+      const isDir = statSync(targetPath).isDirectory();
+      if (process.platform === "darwin") {
+        execSync(isDir ? `open "${targetPath}"` : `open -R "${targetPath}"`, { timeout: 5000 });
+      } else if (process.platform === "win32") {
+        execSync(isDir ? `explorer "${targetPath}"` : `explorer /select,"${targetPath}"`, { timeout: 5000 });
+      } else {
+        execSync(`xdg-open "${dirname(targetPath)}"`, { timeout: 5000 });
+      }
+      return json({ success: true });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "POST:/api/utils/create-file": async (req) => {
+    try {
+      const { parentDir, name } = await req.json() as { parentDir: string; name: string };
+      if (!parentDir || !name) return json({ error: "parentDir and name are required" }, 400);
+      const targetPath = join(parentDir, name);
+      if (existsSync(targetPath)) return json({ error: "File already exists" }, 409);
+      // Create parent dirs if needed (for new folders with a file)
+      const dir = dirname(targetPath);
+      if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+      writeFileSync(targetPath, '', 'utf-8');
+      return json({ success: true, path: targetPath });
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : String(error) }, 500);
     }
   },
 
@@ -740,6 +832,8 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
         engine = `${texBinPath}/pdflatex`;
       } else if (existsSync(`${texBinPath}/xelatex`)) {
         engine = `${texBinPath}/xelatex`;
+      } else if (preferredCompiler === 'browser-wasm') {
+        return json({ success: false, error: 'Client-side WASM compilation requested but reached server. Check frontend configuration.' }, 400);
       } else {
         // Try system PATH as fallback
         try {
@@ -764,15 +858,21 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
       const texDir = require('path').dirname(texPath);
       const texFilename = require('path').basename(texPath);
       const outputName = texFilename.replace(/\.tex$/, '');
+      const outputDir = join(texDir, 'output');
 
-      // Run compilation with synctex enabled
-      const command = `cd "${texDir}" && "${engine}" -synctex=1 -interaction=nonstopmode -file-line-error "${texFilename}" 2>&1`;
+      // Ensure output dir exists
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+
+      // Run compilation with synctex enabled, output to outputDir
+      const command = `cd "${texDir}" && "${engine}" -output-directory=output -synctex=1 -interaction=nonstopmode -file-line-error "${texFilename}" 2>&1`;
 
       try {
         execSync(command, { encoding: 'utf-8', timeout: 60000, maxBuffer: 1024 * 1024 * 10 });
       } catch (compileError: unknown) {
         // LaTeX often returns non-zero even on success, check if PDF was created
-        const pdfPath = join(texDir, `${outputName}.pdf`);
+        const pdfPath = join(outputDir, `${outputName}.pdf`);
         if (!existsSync(pdfPath)) {
           const errorMessage = compileError instanceof Error ? compileError.message : String(compileError);
           // Extract useful error lines
@@ -785,8 +885,8 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
         }
       }
 
-      const pdfPath = join(texDir, `${outputName}.pdf`);
-      const synctexPath = join(texDir, `${outputName}.synctex.gz`);
+      const pdfPath = join(outputDir, `${outputName}.pdf`);
+      const synctexPath = join(outputDir, `${outputName}.synctex.gz`);
 
       if (!existsSync(pdfPath)) {
         return json({ success: false, error: 'PDF was not generated' }, 200);
@@ -797,6 +897,32 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
         pdfPath,
         synctexPath: existsSync(synctexPath) ? synctexPath : null
       });
+    } catch (error) {
+      return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "POST:/api/latex/save-pdf/:projectId": async (req, params) => {
+    try {
+      const projectId = params[0];
+      if (!projectId) return json({ error: 'Project ID required' }, 400);
+
+      const config = await getProjectConfig(projectId);
+      if (!config) return json({ error: 'Project not found' }, 404);
+
+      const outputDir = join(config.sectionsDir, 'output');
+      if (!existsSync(outputDir)) {
+        mkdirSync(outputDir, { recursive: true });
+      }
+
+      const pdfPath = join(outputDir, 'document.pdf');
+
+      // Read binary body
+      const arrayBuffer = await req.arrayBuffer();
+      const buffer = Buffer.from(arrayBuffer);
+      writeFileSync(pdfPath, buffer);
+
+      return json({ success: true, pdfPath });
     } catch (error) {
       return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
     }
@@ -1041,6 +1167,23 @@ const appFetch = async (req: Request) => {
           return json({ error: "File not found" }, 404);
         }
 
+        // Raw binary mode: serve file as-is (for images, PDFs, etc.)
+        if (url.searchParams.get("raw") === "true") {
+          const data = readFileSync(filePath);
+          const ext = filePath.split('.').pop()?.toLowerCase() || '';
+          const mimeTypes: Record<string, string> = {
+            'png': 'image/png', 'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+            'gif': 'image/gif', 'svg': 'image/svg+xml', 'pdf': 'application/pdf',
+            'eps': 'application/postscript', 'bmp': 'image/bmp',
+          };
+          return new Response(data, {
+            headers: {
+              'Content-Type': mimeTypes[ext] || 'application/octet-stream',
+              'Content-Length': String(data.length),
+            }
+          });
+        }
+
         try {
           const content = readFileSync(filePath, "utf-8");
 
@@ -1109,6 +1252,42 @@ const appFetch = async (req: Request) => {
         } catch (error) {
           return json({ error: error instanceof Error ? error.message : String(error) }, 500);
         }
+      } else if (req.method === "DELETE") {
+        // Delete file from project
+        if (!existsSync(filePath)) {
+          return json({ error: "File not found" }, 404);
+        }
+
+        // Safety: ensure the file is within a project directory
+        if (projectId) {
+          const config = await getProjectConfig(projectId);
+          if (config && !filePath.startsWith(config.sectionsDir)) {
+            return json({ error: "Cannot delete files outside project directory" }, 403);
+          }
+        }
+
+        try {
+          unlinkSync(filePath);
+          return json({ success: true });
+        } catch (error) {
+          return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+        }
+      } else if (req.method === "PATCH") {
+        // Rename file
+        try {
+          const body = await req.json() as { newName: string };
+          if (!body.newName) return json({ error: "newName is required" }, 400);
+          if (!existsSync(filePath)) return json({ error: "File not found" }, 404);
+
+          const dir = dirname(filePath);
+          const newPath = join(dir, body.newName);
+          if (existsSync(newPath)) return json({ error: "A file with that name already exists" }, 409);
+
+          renameSync(filePath, newPath);
+          return json({ success: true, newPath });
+        } catch (error) {
+          return json({ error: error instanceof Error ? error.message : String(error) }, 500);
+        }
       }
 
       return json({ error: "Method not allowed" }, 405);
@@ -1130,6 +1309,26 @@ const appFetch = async (req: Request) => {
   return new Response("Not Found", { status: 404 });
 };
 
+// COOP/COEP headers required for SharedArrayBuffer (Siglum WASM LaTeX compiler)
+const CROSS_ORIGIN_HEADERS: Record<string, string> = {
+  'Cross-Origin-Opener-Policy': 'same-origin',
+  'Cross-Origin-Embedder-Policy': 'require-corp',
+};
+
+// Wrap appFetch to inject cross-origin isolation headers into every response
+const appFetchWithHeaders = async (req: Request) => {
+  const response = await appFetch(req);
+  const newHeaders = new Headers(response.headers);
+  for (const [key, value] of Object.entries(CROSS_ORIGIN_HEADERS)) {
+    newHeaders.set(key, value);
+  }
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers: newHeaders,
+  });
+};
+
 // Start server with automatic port selection
 async function startServer(startPort: number) {
   let port = startPort;
@@ -1139,7 +1338,7 @@ async function startServer(startPort: number) {
     try {
       const server = Bun.serve({
         port,
-        fetch: appFetch,
+        fetch: appFetchWithHeaders,
       });
 
       console.log(`FastWrite running at http://localhost:${server.port}`);

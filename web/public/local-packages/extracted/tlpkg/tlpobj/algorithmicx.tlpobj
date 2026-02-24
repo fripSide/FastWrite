@@ -1,0 +1,22 @@
+name algorithmicx
+category Package
+revision 15878
+shortdesc The algorithmic style you always wanted
+relocated 1
+longdesc Algorithmicx provides a flexible, yet easy to use, way for
+longdesc inserting good looking pseudocode or source code in your
+longdesc papers. It has built in support for Pseudocode, Pascal and C,
+longdesc and offers powerful means to create definitions for any
+longdesc programming language. The user can adapt a Pseudocode style to
+longdesc his native language.
+runfiles size=12
+ RELOC/tex/latex/algorithmicx/algc.sty
+ RELOC/tex/latex/algorithmicx/algcompatible.sty
+ RELOC/tex/latex/algorithmicx/algmatlab.sty
+ RELOC/tex/latex/algorithmicx/algorithmicx.sty
+ RELOC/tex/latex/algorithmicx/algpascal.sty
+ RELOC/tex/latex/algorithmicx/algpseudocode.sty
+catalogue-ctan /macros/latex/contrib/algorithmicx
+catalogue-date 2016-06-24 19:18:15 +0200
+catalogue-license lppl
+catalogue-topics pseudocode listing

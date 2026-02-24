@@ -4,6 +4,7 @@ import { ZoomIn, ZoomOut, RefreshCw, AlertCircle, FileWarning, Loader2, FolderOp
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import CompileSettingsModal from './CompileSettingsModal';
+import * as latexCompiler from '../services/latexCompiler';
 
 // Configure PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
@@ -13,6 +14,8 @@ interface PDFViewerProps {
 	mainTexPath: string | null;
 	onSyncToSource?: (filePath: string, line: number) => void;
 	scrollTo?: { page: number; x: number; y: number } | null;
+	compilerMode?: 'pdflatex' | 'xelatex' | 'lualatex' | 'browser-wasm';
+	onCompilerChange?: () => void;
 }
 
 interface CompilationResult {
@@ -35,7 +38,7 @@ export interface PDFViewerRef {
 	compile: () => Promise<void>;
 }
 
-const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTexPath, onSyncToSource, scrollTo }, ref) => {
+const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTexPath, onSyncToSource, scrollTo, compilerMode, onCompilerChange }, ref) => {
 	const [numPages, setNumPages] = useState<number>(0);
 	// ...
 
@@ -52,55 +55,168 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 	const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 	const [clickedLocation, setClickedLocation] = useState<{ page: number; x: number; y: number } | null>(null);
 	const [highlightBox, setHighlightBox] = useState<{ page: number; x: number; y: number; width: number; height: number; lineCount: number } | null>(null);
+	const [wasmReady, setWasmReady] = useState(false);
+	const [wasmInitError, setWasmInitError] = useState<string | null>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 	const pageHeightsRef = useRef<Map<number, number>>(new Map());
+	const pdfBlobUrlRef = useRef<string | null>(null); // Track blob URLs for cleanup
 
-	// Check LaTeX installation status
+	const isBrowserMode = !compilerMode || compilerMode === 'browser-wasm';
+
+	// Check LaTeX availability or init WASM compiler
 	useEffect(() => {
-		const checkLatex = async () => {
-			try {
-				const response = await fetch('/api/latex/status');
-				if (response.ok) {
-					const status = await response.json() as LatexStatus;
-					setLatexStatus(status);
+		if (isBrowserMode) {
+			// In browser mode, initialize WASM compiler instead of checking server
+			setIsCheckingLatex(true);
+			latexCompiler.init()
+				.then(() => {
+					setWasmReady(true);
+					setLatexStatus({ installed: true, engine: 'WASM (Siglum)' });
+				})
+				.catch((err) => {
+					console.error('[LaTeX WASM] Init failed:', err);
+					setWasmInitError(err instanceof Error ? err.message : 'WASM init failed');
+					setLatexStatus({ installed: false });
+				})
+				.finally(() => setIsCheckingLatex(false));
+		} else {
+			// Server mode: check local LaTeX installation
+			const checkLatex = async () => {
+				try {
+					const response = await fetch('/api/latex/status');
+					if (response.ok) {
+						const status = await response.json() as LatexStatus;
+						setLatexStatus(status);
+					}
+				} catch (error) {
+					console.error('Failed to check LaTeX status:', error);
+					setLatexStatus({ installed: false });
+				} finally {
+					setIsCheckingLatex(false);
 				}
-			} catch (error) {
-				console.error('Failed to check LaTeX status:', error);
-				setLatexStatus({ installed: false });
-			} finally {
-				setIsCheckingLatex(false);
+			};
+			checkLatex();
+		}
+
+		// Cleanup blob URLs on unmount
+		return () => {
+			if (pdfBlobUrlRef.current) {
+				URL.revokeObjectURL(pdfBlobUrlRef.current);
 			}
 		};
-		checkLatex();
-	}, []);
+	}, [isBrowserMode]);
 
-	// Compile LaTeX
+	// Compile LaTeX — branches on isBrowserMode
 	const compile = useCallback(async () => {
-		if (!mainTexPath || !latexStatus?.installed) return;
+		if (!mainTexPath) return;
+		if (!isBrowserMode && !latexStatus?.installed) return;
+		if (isBrowserMode && !wasmReady) return;
 
 		setIsCompiling(true);
 		setCompilationError(null);
 		setErrorCount(0);
 
 		try {
-			const response = await fetch('/api/latex/compile', {
-				method: 'POST',
-				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ projectId, texPath: mainTexPath })
-			});
+			if (isBrowserMode) {
+				// === Browser WASM compilation ===
+				// 1. Fetch the main .tex source
+				const srcRes = await fetch(`/api/files/${encodeURIComponent(mainTexPath)}?projectId=${encodeURIComponent(projectId)}`);
+				if (!srcRes.ok) throw new Error('Failed to fetch .tex source');
+				const srcData = await srcRes.json() as { content: string };
 
-			const result = await response.json() as CompilationResult & { warnings?: number };
+				// 2. Fetch all project files for additionalFiles (images, bib, sub-files)
+				const filesRes = await fetch(`/api/projects/${projectId}/files`);
+				let additionalFiles: Record<string, string | Uint8Array> = {};
+				if (filesRes.ok) {
+					const filesData = await filesRes.json();
+					const flatFiles = flattenFileTree(filesData.files || []);
 
-			if (result.success && result.pdfPath) {
-				setPdfUrl(`/api/latex/pdf/${encodeURIComponent(projectId)}?t=${Date.now()}`);
-				// Count warnings/errors from the result
-				if (result.warnings) setErrorCount(result.warnings);
+					// Fetch text-based supporting files (.tex, .bib, .sty, .cls, .bbl)
+					const supportExts = ['.tex', '.bib', '.sty', '.cls', '.bbl'];
+					const filesToFetch = flatFiles.filter(f =>
+						f.path !== mainTexPath && supportExts.some(ext => f.name.endsWith(ext))
+					);
+					const fetches = await Promise.allSettled(
+						filesToFetch.map(async (f) => {
+							const res = await fetch(`/api/files/${encodeURIComponent(f.path)}?projectId=${encodeURIComponent(projectId)}`);
+							if (res.ok) {
+								const data = await res.json() as { content: string };
+								// Use relative path (f.id) as key so \input{sections/...} works
+								additionalFiles[f.id] = data.content;
+							}
+						})
+					);
+
+					// Fetch binary files (images, PDFs) as Uint8Array
+					const binaryExts = ['.png', '.jpg', '.jpeg', '.gif', '.pdf', '.eps', '.bmp', '.svg'];
+					const binaryFiles = flatFiles.filter(f =>
+						binaryExts.some(ext => f.name.toLowerCase().endsWith(ext))
+					);
+					if (binaryFiles.length > 0) {
+						const binaryFetches = await Promise.allSettled(
+							binaryFiles.map(async (f) => {
+								const res = await fetch(`/api/files/${encodeURIComponent(f.path)}?projectId=${encodeURIComponent(projectId)}&raw=true`);
+								if (res.ok) {
+									const data = new Uint8Array(await res.arrayBuffer());
+									additionalFiles[f.id] = data;
+								}
+							})
+						);
+					}
+				}
+
+				// 3. Compile via WASM
+				// Disable cache when we have additional files since cache key only hashes main source
+				const hasAdditional = Object.keys(additionalFiles).length > 0;
+				const result = await latexCompiler.compile(srcData.content, {
+					additionalFiles,
+					useCache: !hasAdditional,
+				});
+
+				if (result.success && result.pdf) {
+					// Revoke previous blob URL
+					if (pdfBlobUrlRef.current) {
+						URL.revokeObjectURL(pdfBlobUrlRef.current);
+					}
+					// Convert Uint8Array to blob URL
+					// Copy the array to avoid "SharedArrayBuffer view cannot be used to construct a Blob" error
+					const pdfBytes = new Uint8Array(result.pdf as any);
+					const blob = new Blob([pdfBytes], { type: 'application/pdf' });
+					const url = URL.createObjectURL(blob);
+					pdfBlobUrlRef.current = url;
+					setPdfUrl(url);
+
+					// Save PDF to project's output directory (fire-and-forget)
+					fetch(`/api/latex/save-pdf/${encodeURIComponent(projectId)}`, {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/pdf' },
+						body: pdfBytes,
+					}).catch(err => console.warn('[PDFViewer] Failed to save PDF to disk:', err));
+				} else {
+					const errMsg = result.error || result.log || 'WASM compilation failed';
+					setCompilationError(errMsg);
+					const errorLines = errMsg.split('\n').filter((l: string) => l.includes('Error') || l.includes('!')).length;
+					setErrorCount(Math.max(1, errorLines));
+				}
 			} else {
-				setCompilationError(result.error || 'Compilation failed');
-				// Count lines with errors
-				const errorLines = (result.error || '').split('\n').filter(l => l.includes('Error') || l.includes('!')).length;
-				setErrorCount(Math.max(1, errorLines));
+				// === Server-side compilation ===
+				const response = await fetch('/api/latex/compile', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ projectId, texPath: mainTexPath })
+				});
+
+				const result = await response.json() as CompilationResult & { warnings?: number };
+
+				if (result.success && result.pdfPath) {
+					setPdfUrl(`/api/latex/pdf/${encodeURIComponent(projectId)}?t=${Date.now()}`);
+					if (result.warnings) setErrorCount(result.warnings);
+				} else {
+					setCompilationError(result.error || 'Compilation failed');
+					const errorLines = (result.error || '').split('\n').filter(l => l.includes('Error') || l.includes('!')).length;
+					setErrorCount(Math.max(1, errorLines));
+				}
 			}
 		} catch (error) {
 			setCompilationError(error instanceof Error ? error.message : 'Compilation failed');
@@ -108,14 +224,15 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 		} finally {
 			setIsCompiling(false);
 		}
-	}, [projectId, mainTexPath, latexStatus?.installed]);
+	}, [projectId, mainTexPath, latexStatus?.installed, isBrowserMode, wasmReady]);
 
 	// Auto-compile when tex path changes
 	useEffect(() => {
-		if (mainTexPath && latexStatus?.installed) {
+		const canCompile = isBrowserMode ? wasmReady : latexStatus?.installed;
+		if (mainTexPath && canCompile) {
 			compile();
 		}
-	}, [mainTexPath, latexStatus?.installed, compile]);
+	}, [mainTexPath, latexStatus?.installed, wasmReady, isBrowserMode, compile]);
 
 	// Determine if we should hide extra controls based on container width
 	const [hideExtras, setHideExtras] = useState(false);
@@ -378,27 +495,83 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 		return pages;
 	};
 
+	// Helper: flatten file tree for WASM compilation
+	function flattenFileTree(nodes: Array<{ id?: string; name: string; type: string; path: string; children?: any[] }>): Array<{ id: string; name: string; path: string }> {
+		let results: Array<{ id: string; name: string; path: string }> = [];
+		for (const node of nodes) {
+			if (node.type === 'file') {
+				results.push({ id: node.id || node.name, name: node.name, path: node.path || node.name });
+			} else if (node.children) {
+				results = [...results, ...flattenFileTree(node.children)];
+			}
+		}
+		return results;
+	}
+
 	// Show loading while checking LaTeX
 	if (isCheckingLatex) {
 		return (
 			<div className="flex flex-col items-center justify-center h-full bg-slate-200 text-slate-500">
 				<Loader2 size={32} className="animate-spin mb-3" />
-				<p className="text-sm">Checking LaTeX installation...</p>
+				<p className="text-sm">{isBrowserMode ? 'Initializing WASM compiler...' : 'Checking LaTeX installation...'}</p>
 			</div>
 		);
 	}
 
-	// Show installation guide if LaTeX not installed
-	if (!latexStatus?.installed) {
+	// Show WASM init error in browser mode — suggest local LaTeX as fallback
+	if (isBrowserMode && wasmInitError) {
+		return (
+			<div className="flex flex-col items-center justify-center h-full bg-slate-200 p-6">
+				<AlertCircle size={48} className="text-red-500 mb-4" />
+				<h3 className="text-lg font-semibold text-slate-700 mb-2">WASM Compiler Error</h3>
+				<p className="text-sm text-slate-500 text-center mb-4 max-w-xs">
+					Failed to initialize the browser-based LaTeX compiler.
+				</p>
+				<pre className="text-xs text-red-600 bg-white p-3 rounded shadow max-w-md overflow-auto whitespace-pre-wrap mb-4">
+					{wasmInitError}
+				</pre>
+				<div className="bg-white rounded-lg p-4 shadow-sm border border-slate-200 max-w-md">
+					<p className="text-xs font-medium text-slate-500 mb-2">Install LaTeX locally as an alternative:</p>
+					<ul className="text-xs text-slate-500 space-y-1">
+						<li><strong>macOS:</strong> <code className="bg-slate-100 px-1 rounded">brew install --cask mactex</code></li>
+						<li><strong>Windows:</strong> Install MiKTeX or TeX Live</li>
+						<li><strong>Linux:</strong> <code className="bg-slate-100 px-1 rounded">sudo apt install texlive-full</code></li>
+					</ul>
+				</div>
+			</div>
+		);
+	}
+
+	// Show installation guide if LaTeX not installed (server mode only)
+	if (!isBrowserMode && !latexStatus?.installed) {
+		const switchToWasm = async () => {
+			try {
+				await fetch(`/api/projects/${encodeURIComponent(projectId)}/config`, {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ compiler: 'browser-wasm' })
+				});
+				onCompilerChange?.();
+			} catch (error) {
+				console.error('Failed to switch compiler:', error);
+			}
+		};
+
 		return (
 			<div className="flex flex-col items-center justify-center h-full bg-slate-200 p-6">
 				<FileWarning size={48} className="text-amber-500 mb-4" />
 				<h3 className="text-lg font-semibold text-slate-700 mb-2">LaTeX Not Installed</h3>
 				<p className="text-sm text-slate-500 text-center mb-4 max-w-xs">
-					PDF preview requires a local LaTeX installation (pdflatex or xelatex).
+					PDF preview requires a local LaTeX installation, or you can use the browser-based WebAssembly compiler.
 				</p>
+				<button
+					onClick={switchToWasm}
+					className="mb-4 px-5 py-2.5 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium text-sm shadow-sm"
+				>
+					Use WebAssembly Compiler
+				</button>
 				<div className="bg-white rounded-lg p-4 shadow-sm border border-slate-200 max-w-md">
-					<p className="text-xs font-medium text-slate-600 mb-2">Installation Guide:</p>
+					<p className="text-xs font-medium text-slate-500 mb-2">Or install locally:</p>
 					<ul className="text-xs text-slate-500 space-y-1">
 						<li><strong>macOS:</strong> <code className="bg-slate-100 px-1 rounded">brew install --cask mactex</code></li>
 						<li><strong>Windows:</strong> Install MiKTeX or TeX Live</li>
@@ -591,10 +764,24 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 				className="flex-1 overflow-auto flex flex-col items-center bg-slate-300 p-4"
 			>
 				{compilationError ? (
-					<div className="flex flex-col items-center justify-center text-center p-6">
-						<AlertCircle size={48} className="text-red-500 mb-3" />
-						<p className="text-sm text-red-600 mb-2">Compilation Error</p>
-						<pre className="text-xs text-slate-600 bg-white p-3 rounded shadow max-w-md overflow-auto whitespace-pre-wrap">
+					<div className="flex flex-col items-center justify-center text-center p-6 h-full overflow-auto">
+						<AlertCircle size={48} className="text-red-500 mb-3 flex-shrink-0" />
+						<p className="text-sm text-red-600 mb-2 flex-shrink-0">Compilation Error</p>
+
+						{(compilationError.includes('not found') || compilationError.includes('File `')) && (
+							<div className="mb-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg max-w-md text-left flex-shrink-0">
+								<p className="text-xs font-semibold text-yellow-800 mb-1">Missing Package?</p>
+								<p className="text-xs text-yellow-700">
+									The browser compiler has a limited set of packages. If a package is missing:
+									<ul className="list-disc pl-4 mt-1 space-y-0.5">
+										<li>Remove the package from your .tex file</li>
+										<li>Or switch to a <strong>Local LaTeX Engine</strong> in settings</li>
+									</ul>
+								</p>
+							</div>
+						)}
+
+						<pre className="text-xs text-slate-600 bg-white p-3 rounded shadow max-w-md overflow-auto whitespace-pre-wrap text-left w-full">
 							{compilationError}
 						</pre>
 					</div>
