@@ -659,7 +659,7 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
       const cloneTarget = join(tempDir, repoName);
 
       const cloneResult = cloneRepo(
-        `https://github.com/${owner}/${repo}.git`,
+        `https://github.com/${owner}/${repoName}.git`,
         projectBranch,
         cloneTarget,
         token

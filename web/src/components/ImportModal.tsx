@@ -178,7 +178,7 @@ const ImportModal: React.FC<ImportModalProps> = ({ isOpen, onClose, onImportComp
   };
 
   const handleImport = async () => {
-    if (!projectName.trim()) {
+    if (importType === 'local' && !projectName.trim()) {
       setError('Please enter a project name');
       return;
     }
