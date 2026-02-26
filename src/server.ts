@@ -242,16 +242,21 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     try {
       let command = "";
       if (process.platform === "darwin") {
-        command = `osascript -e 'POSIX path of (choose folder with prompt "Select LaTeX Project Directory")'`;
+        command = `osascript -e 'POSIX path of (choose folder with prompt "Select LaTeX Project Directory")' 2>&1`;
       } else if (process.platform === "win32") {
         command = `powershell -command "Add-Type -AssemblyName System.Windows.Forms; $f = New-Object System.Windows.Forms.FolderBrowserDialog; $f.Description = 'Select LaTeX Project Directory'; if($f.ShowDialog() -eq 'OK') { $f.SelectedPath }"`;
       } else {
         command = `zenity --file-selection --directory --title="Select LaTeX Project Directory" 2>/dev/null || kdialog --getexistingdirectory ~ 2>/dev/null`;
       }
-      const path = execSync(command, { encoding: 'utf-8', timeout: 60000 }).trim();
-      return json({ path: path || null });
+      const output = execSync(command, { encoding: 'utf-8', timeout: 60000 }).trim();
+      // Filter out osascript stderr noise (IMKClient messages)
+      const lines = output.split('\n');
+      const path = lines.filter(l => l.startsWith('/') && !l.includes('IMKClient')).pop()?.trim() || null;
+      console.log('Directory picker output:', JSON.stringify(output));
+      console.log('Directory picker path:', path);
+      return json({ path });
     } catch (err) {
-      console.log('Directory picker:', err instanceof Error ? err.message : 'cancelled');
+      console.log('Directory picker error:', err instanceof Error ? err.message : 'cancelled');
       return json({ path: null });
     }
   },
