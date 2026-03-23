@@ -1,10 +1,16 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { FileText, Loader2, MessageSquare, Send, Trash2 } from 'lucide-react';
+import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { FileText, Loader2, MessageSquare, Send } from 'lucide-react';
 import type { ChatMessage, SelectedFile, SelectedProject } from '../types';
+import LLMSettingsModal from './LLMSettingsModal';
 
 interface ProjectChatPanelProps {
   selectedProject: SelectedProject | null;
   selectedFile: SelectedFile | null;
+}
+
+export interface ProjectChatPanelRef {
+  clearHistory: () => void;
+  openSettings: () => void;
 }
 
 const CHAT_HISTORY_KEY = 'project-chat:global';
@@ -14,12 +20,13 @@ If the current context is insufficient, say what information is missing instead 
 Do not claim that you edited files or executed actions.`;
 const MAX_CONTEXT_CHARS = 12000;
 
-const ProjectChatPanel: React.FC<ProjectChatPanelProps> = ({ selectedProject, selectedFile }) => {
+const ProjectChatPanel = forwardRef<ProjectChatPanelRef, ProjectChatPanelProps>(({ selectedProject, selectedFile }, ref) => {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isSending, setIsSending] = useState(false);
   const [isHistoryLoaded, setIsHistoryLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [showLLMSettings, setShowLLMSettings] = useState(false);
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const projectId = selectedProject?.project.id || null;
@@ -165,11 +172,20 @@ const ProjectChatPanel: React.FC<ProjectChatPanelProps> = ({ selectedProject, se
     setError(null);
   };
 
+  useImperativeHandle(ref, () => ({
+    clearHistory: () => {
+      handleClearHistory();
+    },
+    openSettings: () => {
+      setShowLLMSettings(true);
+    }
+  }), []);
+
   if (!selectedProject) {
     return (
-      <div className="flex h-full items-center justify-center bg-slate-900 text-slate-400">
+      <div className="flex h-full items-center justify-center bg-white text-slate-500">
         <div className="text-center px-6">
-          <MessageSquare size={32} className="mx-auto mb-3 text-slate-500" />
+          <MessageSquare size={32} className="mx-auto mb-3 text-slate-300" />
           <p className="text-sm">Select a project to start chatting</p>
         </div>
       </div>
@@ -177,30 +193,21 @@ const ProjectChatPanel: React.FC<ProjectChatPanelProps> = ({ selectedProject, se
   }
 
   return (
-    <div className="flex h-full flex-col bg-slate-950 text-slate-100">
-      <div className="border-b border-slate-800 px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-sm font-semibold">
-              <MessageSquare size={16} className="text-blue-400" />
-              <span>Project Chat</span>
-            </div>
-            <p className="mt-1 truncate text-xs text-slate-400">{selectedProject.project.name}</p>
-            <div className="mt-2 flex items-center gap-2 text-xs text-slate-500">
+    <div className="flex h-full flex-col bg-white text-slate-800">
+      <div className="border-b border-slate-200 bg-slate-50 px-4 py-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <MessageSquare size={16} className="text-blue-400" />
+            <span>Project Chat</span>
+          </div>
+          <div className="mt-1 flex items-center gap-2 text-xs text-slate-500">
+            <span className="truncate">{selectedProject.project.name}</span>
+            <span className="text-slate-300">/</span>
+            <div className="flex min-w-0 items-center gap-1.5">
               <FileText size={12} />
               <span className="truncate">{selectedFile?.name || 'No file selected'}</span>
             </div>
           </div>
-
-          <button
-            onClick={handleClearHistory}
-            disabled={messages.length === 0}
-            className="flex items-center gap-1 rounded-md border border-slate-800 px-2 py-1 text-xs text-slate-400 transition-colors hover:border-slate-700 hover:text-slate-200 disabled:cursor-not-allowed disabled:opacity-50"
-            title="Clear chat history"
-          >
-            <Trash2 size={12} />
-            Clear
-          </button>
         </div>
       </div>
 
@@ -218,13 +225,13 @@ const ProjectChatPanel: React.FC<ProjectChatPanelProps> = ({ selectedProject, se
                 <div className={`max-w-[92%] rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                   message.role === 'user'
                     ? 'bg-blue-500 text-white'
-                    : 'bg-slate-900 text-slate-100 ring-1 ring-slate-800'
+                    : 'bg-slate-50 text-slate-800 ring-1 ring-slate-200'
                 }`}>
                   <div className="whitespace-pre-wrap">{message.content}</div>
                   <div className="mt-2 flex items-center gap-2 text-[10px] opacity-70">
                     <span>{new Date(message.timestamp).toLocaleTimeString()}</span>
                     {message.role === 'ai' && message.model && (
-                      <span className="rounded bg-slate-800 px-1.5 py-0.5 text-slate-300">{message.model}</span>
+                      <span className="rounded bg-white px-1.5 py-0.5 text-slate-500 ring-1 ring-slate-200">{message.model}</span>
                     )}
                   </div>
                 </div>
@@ -234,14 +241,14 @@ const ProjectChatPanel: React.FC<ProjectChatPanelProps> = ({ selectedProject, se
         )}
       </div>
 
-      <div className="border-t border-slate-800 p-4">
+      <div className="border-t border-slate-200 bg-slate-50 p-4">
         {error && (
-          <div className="mb-3 rounded-md border border-red-900 bg-red-950/50 px-3 py-2 text-xs text-red-300">
+          <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
             {error}
           </div>
         )}
 
-        <div className="rounded-2xl border border-slate-800 bg-slate-900 p-3">
+        <div className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -253,7 +260,7 @@ const ProjectChatPanel: React.FC<ProjectChatPanelProps> = ({ selectedProject, se
             }}
             rows={4}
             placeholder="Ask about the current project or file..."
-            className="w-full resize-none bg-transparent text-sm text-slate-100 outline-none placeholder:text-slate-500"
+            className="w-full resize-none bg-transparent text-sm text-slate-800 outline-none placeholder:text-slate-400"
           />
           <div className="mt-3 flex items-center justify-between gap-3">
             <p className="text-[11px] text-slate-500">
@@ -262,7 +269,7 @@ const ProjectChatPanel: React.FC<ProjectChatPanelProps> = ({ selectedProject, se
             <button
               onClick={() => void handleSend()}
               disabled={!input.trim() || isSending}
-              className="flex items-center gap-2 rounded-full bg-blue-500 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-400 disabled:cursor-not-allowed disabled:bg-slate-700"
+              className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400"
             >
               {isSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
               Send
@@ -270,8 +277,15 @@ const ProjectChatPanel: React.FC<ProjectChatPanelProps> = ({ selectedProject, se
           </div>
         </div>
       </div>
+
+      <LLMSettingsModal
+        isOpen={showLLMSettings}
+        onClose={() => setShowLLMSettings(false)}
+      />
     </div>
   );
-};
+});
+
+ProjectChatPanel.displayName = 'ProjectChatPanel';
 
 export default ProjectChatPanel;
