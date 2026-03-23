@@ -3,6 +3,7 @@ import ImportModal from './components/ImportModal';
 import Sidebar from './components/Sidebar';
 import MainEditor, { MainEditorRef } from './components/MainEditor'; // Import Ref type
 import PDFViewer, { PDFViewerRef } from './components/PDFViewer'; // Import Ref type
+import ProjectChatPanel from './components/ProjectChatPanel';
 import type { Project, SelectedProject, FileNode, SelectedFile, ProjectConfig } from './types';
 import { api } from './api';
 import { ArrowLeft, ArrowRight, AlertCircle, Check, Loader2 } from 'lucide-react'; // Import Icons
@@ -15,6 +16,7 @@ function App() {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [scrollToLine, setScrollToLine] = useState<number | null>(null);
   const [pdfScrollTarget, setPdfScrollTarget] = useState<{ page: number; x: number; y: number; lineCount?: number } | null>(null);
+  const [workspaceMode, setWorkspaceMode] = useState<'editor' | 'chat'>('editor');
 
   // Toast State
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'loading' } | null>(null);
@@ -365,7 +367,7 @@ function App() {
           />
         </div>
 
-        {/* PDF resize handle */}
+        {/* Right panel resize handle */}
         {selectedProject && (
           <div
             className={`shrink-0 w-1 cursor-col-resize flex flex-col items-center justify-center relative group/pdf transition-colors z-10 ${isResizingPdf ? 'bg-blue-500' : 'bg-slate-200 hover:bg-slate-300'}`}
@@ -382,8 +384,8 @@ function App() {
               <div className="w-0.5 h-0.5 rounded-full bg-slate-400" />
             </div>
 
-            {/* Sync Buttons Pill - Only show when PDF is expanded */}
-            {pdfWidth > 0 && (
+            {/* Sync Buttons Pill - Only show when PDF panel is visible */}
+            {workspaceMode === 'editor' && pdfWidth > 0 && (
               <div className="flex flex-col gap-1.5 bg-white shadow-md rounded-full py-2 px-0.5 z-20 border border-slate-200 mb-4">
                 <button
                   onMouseDown={(e) => e.stopPropagation()} // Prevent drag start
@@ -422,25 +424,59 @@ function App() {
           </div>
         )}
 
-        {/* Right: PDF Viewer */}
+        {/* Right: Assistant Panel */}
         {selectedProject && (
           <div
-            className="shrink-0 overflow-hidden bg-slate-800"
+            className={`shrink-0 overflow-hidden ${workspaceMode === 'editor' ? 'bg-slate-800' : 'bg-slate-950'}`}
             style={{ width: pdfWidth }}
           >
-            <PDFViewer
-              ref={pdfViewerRef}
-              projectId={selectedProject.project.id}
-              mainTexPath={mainTexPath}
-              onSyncToSource={handleSyncToSource}
-              scrollTo={pdfScrollTarget}
-              compilerMode={projectConfig?.compiler}
-              onCompilerChange={() => {
-                api.getProjectConfig(selectedProject.project.id).then(config => {
-                  if (config) setProjectConfig(config);
-                });
-              }}
-            />
+            <div className="flex h-full flex-col">
+              <div className="border-b border-slate-800 bg-slate-950/80 px-3 py-2">
+                <div className="inline-flex rounded-lg border border-slate-800 bg-slate-900 p-1 text-xs font-medium">
+                  <button
+                    onClick={() => setWorkspaceMode('editor')}
+                    className={`rounded-md px-3 py-1.5 transition-colors ${workspaceMode === 'editor'
+                      ? 'bg-blue-500 text-white'
+                      : 'text-slate-300 hover:bg-slate-800'
+                      }`}
+                  >
+                    Editor
+                  </button>
+                  <button
+                    onClick={() => setWorkspaceMode('chat')}
+                    className={`rounded-md px-3 py-1.5 transition-colors ${workspaceMode === 'chat'
+                      ? 'bg-blue-500 text-white'
+                      : 'text-slate-300 hover:bg-slate-800'
+                      }`}
+                  >
+                    Chat
+                  </button>
+                </div>
+              </div>
+
+              <div className="min-h-0 flex-1">
+                {workspaceMode === 'editor' ? (
+                  <PDFViewer
+                    ref={pdfViewerRef}
+                    projectId={selectedProject.project.id}
+                    mainTexPath={mainTexPath}
+                    onSyncToSource={handleSyncToSource}
+                    scrollTo={pdfScrollTarget}
+                    compilerMode={projectConfig?.compiler}
+                    onCompilerChange={() => {
+                      api.getProjectConfig(selectedProject.project.id).then(config => {
+                        if (config) setProjectConfig(config);
+                      });
+                    }}
+                  />
+                ) : (
+                  <ProjectChatPanel
+                    selectedProject={selectedProject}
+                    selectedFile={selectedFile}
+                  />
+                )}
+              </div>
+            </div>
           </div>
         )}
       </div>

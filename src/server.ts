@@ -192,12 +192,14 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     return success ? json({ success: true }) : json({ error: "Project not found" }, 404);
   },
 
-  "GET:/api/projects/:id/ai-cache": async (_req, params) => {
+  "GET:/api/projects/:id/ai-cache": async (req, params) => {
     const projectId = params[0];
     if (!projectId) return json({ error: "Project ID required" }, 400);
     const config = await getProjectConfig(projectId);
     if (!config) return json({ error: "Project not found" }, 404);
-    const cache = await loadAICache(config.sectionsDir);
+    const scope = new URL(req.url).searchParams.get("scope");
+    const cacheFileName = scope === "chat" ? "chat-cache.json" : "ai-cache.json";
+    const cache = await loadAICache(config.sectionsDir, cacheFileName);
     return json(cache);
   },
 
@@ -206,8 +208,10 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     if (!projectId) return json({ error: "Project ID required" }, 400);
     const config = await getProjectConfig(projectId);
     if (!config) return json({ error: "Project not found" }, 404);
+    const scope = new URL(req.url).searchParams.get("scope");
+    const cacheFileName = scope === "chat" ? "chat-cache.json" : "ai-cache.json";
     const body = await req.json() as Record<string, any[]>;
-    await saveAICache(config.sectionsDir, body);
+    await saveAICache(config.sectionsDir, body, cacheFileName);
     return json({ success: true });
   },
 

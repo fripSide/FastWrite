@@ -446,9 +446,9 @@ function stripMarkdownCodeFences(text: string): string {
   return (match?.[1] ?? trimmed).trim();
 }
 
-export async function loadAICache(projectPath: string): Promise<Record<string, any[]>> {
+export async function loadAICache(projectPath: string, fileName: string = 'ai-cache.json'): Promise<Record<string, any[]>> {
   try {
-    const cachePath = join(projectPath, '.fastwrite', 'ai-cache.json');
+    const cachePath = join(projectPath, '.fastwrite', fileName);
     if (!existsSync(cachePath)) return {};
     const content = await Bun.file(cachePath).text();
     return JSON.parse(content);
@@ -458,13 +458,13 @@ export async function loadAICache(projectPath: string): Promise<Record<string, a
   }
 }
 
-export async function saveAICache(projectPath: string, cache: Record<string, any[]>) {
+export async function saveAICache(projectPath: string, cache: Record<string, any[]>, fileName: string = 'ai-cache.json') {
   try {
     const dir = join(projectPath, '.fastwrite');
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
-    const cachePath = join(projectPath, '.fastwrite', 'ai-cache.json');
+    const cachePath = join(projectPath, '.fastwrite', fileName);
     await Bun.write(cachePath, JSON.stringify(cache, null, 2));
   } catch (e) {
     console.error('Failed to save AI cache:', e);
