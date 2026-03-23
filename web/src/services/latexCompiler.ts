@@ -3,7 +3,7 @@
  * Singleton wrapper around SiglumCompiler.
  */
 
-import { SiglumCompiler, createBatchedLogger } from '@siglum/engine';
+import { SiglumCompiler } from '@siglum/engine';
 
 export interface CompileOptions {
     engine?: string;
@@ -39,9 +39,9 @@ function getCompiler(): SiglumCompiler {
             enableDocCache: true,  // Cache compiled PDFs by preamble hash
             verbose: true,         // Enable verbose for debugging
             eagerBundles: ['extra-misc', 'tex-latex-misc'], // Force load extra + commonly used packages (geometry, natbib, etc.)
-            onLog: createBatchedLogger((msgs: string[]) => {
-                logMessages.push(...msgs);
-            }),
+            onLog: (msg: string) => {
+                logMessages.push(msg);
+            },
             onProgress: (stage: string, detail: string) => {
                 console.log(`[LaTeX] ${stage}: ${detail}`);
             },
@@ -142,9 +142,13 @@ export async function compile(
     const c = getCompiler();
     const result = await c.compile(source, options);
 
-    // Append captured logs to result
-    if (logMessages.length > 0 && !result.log) {
-        (result as any).log = logMessages.join('\n');
+    const capturedLog = logMessages.join('\n');
+    if (capturedLog) {
+        if (result.log && result.log !== capturedLog) {
+            (result as any).log = `${capturedLog}\n${result.log}`;
+        } else if (!result.log) {
+            (result as any).log = capturedLog;
+        }
     }
 
     return result;
@@ -168,5 +172,6 @@ export function unload(): void {
         compiler.unload();
         compiler = null;
         initPromise = null;
+        localPackagesLoaded = false;
     }
 }

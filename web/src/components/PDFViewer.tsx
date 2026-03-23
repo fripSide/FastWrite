@@ -25,6 +25,21 @@ interface CompilationResult {
 	synctexPath?: string;
 }
 
+interface PackageInstallError {
+	packageName: string;
+	requestedFiles: string[];
+	reason: string;
+}
+
+interface PackageInstallApiResult {
+	installedPackages?: string[];
+	manifestUpdated?: boolean;
+	extractedMissingFiles?: string[];
+	unresolvedFiles?: string[];
+	bundleHintPackages?: string[];
+	packageErrors?: PackageInstallError[];
+}
+
 interface LatexStatus {
 	installed: boolean;
 	version?: string;
@@ -63,6 +78,72 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 	const pdfBlobUrlRef = useRef<string | null>(null); // Track blob URLs for cleanup
 
 	const isBrowserMode = !compilerMode || compilerMode === 'browser-wasm';
+
+	const reinitializeBrowserCompiler = useCallback(async () => {
+		latexCompiler.unload();
+		await latexCompiler.init();
+		setWasmReady(true);
+	}, []);
+
+	const formatPackageErrors = useCallback((packageErrors: PackageInstallError[]) => {
+		const details = packageErrors.map(({ packageName, requestedFiles, reason }) => {
+			const files = requestedFiles.length > 0 ? ` (${requestedFiles.join(', ')})` : '';
+			return `- ${packageName}${files}: ${reason}`;
+		});
+		return `Automatic third-party package fetch failed. Invalid packages detected:\n${details.join('\n')}`;
+	}, []);
+
+	const formatCompilationError = useCallback((rawError: string) => {
+		const packageMatches = Array.from(
+			rawError.matchAll(/\((\/(?:[^()\s]+\/)?([^/()\s]+?\.(?:sty|cls|def|cfg|ldf|clo|bst)))/g)
+		);
+		const lastPackage = packageMatches.at(-1)?.[2] || null;
+		const hasExplicitLatexError =
+			rawError.includes('! ') ||
+			rawError.includes('LaTeX Error:') ||
+			rawError.includes('[TeX ERR]');
+
+		if (!lastPackage || hasExplicitLatexError) {
+			return rawError;
+		}
+
+		return `Likely failed while loading: ${lastPackage}\n\n${rawError}`;
+	}, []);
+
+	const injectBundleHintPackages = useCallback((source: string, packageNames: string[]) => {
+		if (packageNames.length === 0) {
+			return source;
+		}
+
+		const existingPackages = new Set<string>();
+		for (const match of source.matchAll(/\\usepackage(?:\[[^\]]*])?\{([^}]*)\}/g)) {
+			for (const item of (match[1] || '').split(',')) {
+				const pkg = item.trim();
+				if (pkg) {
+					existingPackages.add(pkg);
+				}
+			}
+		}
+
+		const documentClass = source.match(/\\documentclass(?:\[[^\]]*])?\{([^}]*)\}/)?.[1]?.trim() || '';
+		if (documentClass) {
+			existingPackages.add(documentClass);
+		}
+
+		const safePackages = Array.from(new Set(packageNames.map(name => name.trim()).filter(Boolean)))
+			.filter(name => !existingPackages.has(name));
+		if (safePackages.length === 0) {
+			return source;
+		}
+
+		const injection = `% FastWrite bundle hints\n${safePackages.map(name => `\\usepackage{${name}}`).join('\n')}\n`;
+		const beginDocumentPattern = /\\begin\{document\}/;
+		if (beginDocumentPattern.test(source)) {
+			return source.replace(beginDocumentPattern, `${injection}\\begin{document}`);
+		}
+
+		return `${source}\n${injection}`;
+	}, []);
 
 	// Check LaTeX availability or init WASM compiler
 	useEffect(() => {
@@ -120,10 +201,31 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 		try {
 			if (isBrowserMode) {
 				// === Browser WASM compilation ===
+				const prepareResponse = await fetch('/api/latex/packages/prepare', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ mainTexPath })
+				});
+				let prepareResult: PackageInstallApiResult | null = null;
+				if (prepareResponse.ok) {
+					prepareResult = await prepareResponse.json() as PackageInstallApiResult;
+					if ((prepareResult.packageErrors?.length || 0) > 0) {
+						const errorMessage = formatPackageErrors(prepareResult.packageErrors || []);
+						setCompilationError(errorMessage);
+						setErrorCount(Math.max(1, prepareResult.packageErrors?.length || 1));
+						return;
+					}
+					if ((prepareResult.installedPackages?.length || 0) > 0 || prepareResult.manifestUpdated) {
+						await reinitializeBrowserCompiler();
+					}
+				}
+
 				// 1. Fetch the main .tex source
 				const srcRes = await fetch(`/api/files/${encodeURIComponent(mainTexPath)}?projectId=${encodeURIComponent(projectId)}`);
 				if (!srcRes.ok) throw new Error('Failed to fetch .tex source');
 				const srcData = await srcRes.json() as { content: string };
+				const hintedPackages = new Set<string>(prepareResult?.bundleHintPackages || []);
+				let compileSource = injectBundleHintPackages(srcData.content, Array.from(hintedPackages));
 
 				// 2. Fetch all project files for additionalFiles (images, bib, sub-files)
 				const filesRes = await fetch(`/api/projects/${projectId}/files`);
@@ -169,10 +271,42 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 				// 3. Compile via WASM
 				// Disable cache when we have additional files since cache key only hashes main source
 				const hasAdditional = Object.keys(additionalFiles).length > 0;
-				const result = await latexCompiler.compile(srcData.content, {
+				let result = await latexCompiler.compile(compileSource, {
 					additionalFiles,
 					useCache: !hasAdditional,
 				});
+
+				for (let attempt = 0; attempt < 3 && (!result.success || !result.pdf); attempt++) {
+					const errMsg = result.error || result.log || 'WASM compilation failed';
+					const installResponse = await fetch('/api/latex/packages/install-from-log', {
+						method: 'POST',
+						headers: { 'Content-Type': 'application/json' },
+						body: JSON.stringify({ log: errMsg })
+					});
+					if (!installResponse.ok) break;
+
+					const installResult = await installResponse.json() as PackageInstallApiResult;
+					if ((installResult.packageErrors?.length || 0) > 0) {
+						const errorMessage = formatPackageErrors(installResult.packageErrors || []);
+						setCompilationError(errorMessage);
+						setErrorCount(Math.max(1, installResult.packageErrors?.length || 1));
+						return;
+					}
+					for (const pkg of installResult.bundleHintPackages || []) {
+						hintedPackages.add(pkg);
+					}
+					const installedCount = installResult.installedPackages?.length || 0;
+					const extractedCount = installResult.extractedMissingFiles?.length || 0;
+					const hintedCount = installResult.bundleHintPackages?.length || 0;
+					if ((installedCount === 0 && hintedCount === 0) || (extractedCount === 0 && hintedCount === 0)) break;
+
+					await reinitializeBrowserCompiler();
+					compileSource = injectBundleHintPackages(srcData.content, Array.from(hintedPackages));
+					result = await latexCompiler.compile(compileSource, {
+						additionalFiles,
+						useCache: false,
+					});
+				}
 
 				if (result.success && result.pdf) {
 					// Revoke previous blob URL
@@ -194,7 +328,7 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 						body: pdfBytes,
 					}).catch(err => console.warn('[PDFViewer] Failed to save PDF to disk:', err));
 				} else {
-					const errMsg = result.error || result.log || 'WASM compilation failed';
+					const errMsg = formatCompilationError(result.error || result.log || 'WASM compilation failed');
 					setCompilationError(errMsg);
 					const errorLines = errMsg.split('\n').filter((l: string) => l.includes('Error') || l.includes('!')).length;
 					setErrorCount(Math.max(1, errorLines));
@@ -224,7 +358,7 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 		} finally {
 			setIsCompiling(false);
 		}
-	}, [projectId, mainTexPath, latexStatus?.installed, isBrowserMode, wasmReady]);
+	}, [projectId, mainTexPath, latexStatus?.installed, isBrowserMode, wasmReady, reinitializeBrowserCompiler, formatPackageErrors, formatCompilationError, injectBundleHintPackages]);
 
 	// Auto-compile when tex path changes
 	useEffect(() => {
@@ -744,7 +878,7 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 
 			{/* Error log panel */}
 			{showErrorLog && compilationError && (
-				<div className="bg-red-50 border-b border-red-200 p-3 max-h-40 overflow-auto">
+				<div className="bg-red-50 border-b border-red-200 p-3 max-h-[45vh] overflow-auto">
 					<div className="flex justify-between items-start mb-2">
 						<span className="text-sm font-medium text-red-700">Compilation Errors</span>
 						<button
@@ -754,7 +888,12 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 							Close
 						</button>
 					</div>
-					<pre className="text-xs text-red-600 whitespace-pre-wrap font-mono">{compilationError}</pre>
+					<p className="text-xs text-red-500 mb-2">
+						Showing full compiler output. Scroll to the end for the fatal error.
+					</p>
+					<pre className="text-xs leading-5 text-red-700 whitespace-pre-wrap break-words font-mono bg-white p-3 rounded border border-red-100">
+						{compilationError}
+					</pre>
 				</div>
 			)}
 
@@ -781,7 +920,12 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 							</div>
 						)}
 
-						<pre className="text-xs text-slate-600 bg-white p-3 rounded shadow max-w-md overflow-auto whitespace-pre-wrap text-left w-full">
+						<p className="text-xs text-slate-500 mb-2 flex-shrink-0">
+							Below is the full compiler output. If the visible end does not include a fatal error,
+							use the red error badge above to expand the log panel.
+						</p>
+
+						<pre className="text-xs leading-5 text-slate-700 bg-white p-3 rounded shadow overflow-auto whitespace-pre-wrap break-words text-left w-full max-w-none max-h-[50vh]">
 							{compilationError}
 						</pre>
 					</div>

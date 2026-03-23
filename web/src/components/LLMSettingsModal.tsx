@@ -3,6 +3,15 @@ import { createPortal } from 'react-dom';
 import { X, Key, Server, Bot, Eye, EyeOff, Loader2, CheckCircle, AlertCircle, Zap, Plus, Trash2, RefreshCw, Check } from 'lucide-react';
 import type { LLMProvider } from '../types';
 
+const LEGACY_PROVIDER_ID = 'legacy-env-config';
+
+interface LegacyLLMConfig {
+	baseUrl: string;
+	apiKey: string;
+	model: string;
+	hasApiKey?: boolean;
+}
+
 interface LLMSettingsModalProps {
 	isOpen: boolean;
 	onClose: () => void;
@@ -69,21 +78,62 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 		setIsLoading(true);
 		try {
 			const response = await fetch('/api/llm-providers');
-			if (response.ok) {
-				const data = await response.json();
+			if (!response.ok) {
+				setProviders([]);
+				return;
+			}
+
+			const data = await response.json() as LLMProvider[];
+			if (data.length > 0) {
 				setProviders(data);
-				// Select active provider by default, or first one if none active
-				if (data.length > 0 && !selectedProvider) {
+				if (!selectedProvider) {
 					const active = data.find((p: LLMProvider) => p.isActive);
 					selectProvider(active || data[0]);
 				}
+				return;
 			}
+
+			const legacyResponse = await fetch('/api/llm-config');
+			if (!legacyResponse.ok) {
+				setProviders([]);
+				return;
+			}
+
+			const legacyConfig = await legacyResponse.json() as LegacyLLMConfig;
+			const hasLegacyConfig = Boolean(
+				legacyConfig.baseUrl ||
+				legacyConfig.model ||
+				legacyConfig.hasApiKey ||
+				legacyConfig.apiKey
+			);
+
+			if (!hasLegacyConfig) {
+				setProviders([]);
+				return;
+			}
+
+			const legacyProvider: LLMProvider = {
+				id: LEGACY_PROVIDER_ID,
+				name: 'Environment Default',
+				baseUrl: legacyConfig.baseUrl || 'https://api.openai.com/v1',
+				apiKey: legacyConfig.apiKey || '',
+				models: legacyConfig.model ? [legacyConfig.model] : [],
+				selectedModel: legacyConfig.model || '',
+				isActive: true,
+				createdAt: 0
+			};
+
+			setProviders([legacyProvider]);
+			selectProvider(legacyProvider);
 		} catch (error) {
 			console.error('Failed to load providers:', error);
+			setProviders([]);
 		} finally {
 			setIsLoading(false);
 		}
 	};
+
+	const isLegacyProvider = selectedProvider?.id === LEGACY_PROVIDER_ID;
 
 	const selectProvider = (provider: LLMProvider) => {
 		setSelectedProvider(provider);
@@ -166,9 +216,9 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 
 	const handleSave = async () => {
 		if (!selectedProvider) return;
-		if (!editName.trim() || !editBaseUrl.trim()) {
+		if ((!isLegacyProvider && !editName.trim()) || !editBaseUrl.trim()) {
 			setStatus('error');
-			setStatusMessage('Name and Base URL are required');
+			setStatusMessage(isLegacyProvider ? 'Base URL is required' : 'Name and Base URL are required');
 			return;
 		}
 
@@ -182,6 +232,49 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 				abortController.current.abort();
 			}
 			abortController.current = new AbortController();
+
+			if (isLegacyProvider) {
+				const testResponse = await fetch('/api/llm-config/test', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						baseUrl: editBaseUrl,
+						apiKey: editApiKey || selectedProvider.apiKey,
+						model: editSelectedModel || selectedProvider.selectedModel || 'gpt-4o'
+					}),
+					signal: abortController.current.signal
+				});
+				const testData = await testResponse.json();
+
+				if (!testData.success) {
+					setStatus('error');
+					setStatusMessage(testData.error || 'Connection test failed');
+					setIsSaving(false);
+					return;
+				}
+
+				const saveResponse = await fetch('/api/llm-config', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({
+						baseUrl: editBaseUrl.trim(),
+						apiKey: editApiKey || undefined,
+						model: editSelectedModel || selectedProvider.selectedModel || 'gpt-4o'
+					}),
+					signal: abortController.current.signal
+				});
+
+				if (saveResponse.ok) {
+					setStatus('success');
+					setStatusMessage('Saved successfully!');
+					await loadProviders();
+					setTimeout(() => onClose(), 1000);
+				} else {
+					setStatus('error');
+					setStatusMessage('Failed to save');
+				}
+				return;
+			}
 
 			// Test connection first
 			const testResponse = await fetch('/api/llm-config/test', {
@@ -288,7 +381,8 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 						<h3 className="font-semibold text-slate-700 text-sm">Providers</h3>
 						<button
 							onClick={handleAddProvider}
-							className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors text-slate-600"
+							disabled={isLegacyProvider || isSaving}
+							className="p-1.5 hover:bg-slate-200 rounded-lg transition-colors text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed"
 							title="Add Provider"
 						>
 							<Plus size={18} />
@@ -322,6 +416,11 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 											{provider.isActive && (
 												<span className="px-1.5 py-0.5 bg-green-100 text-green-700 text-[10px] font-medium rounded">
 													Active
+												</span>
+											)}
+											{provider.id === LEGACY_PROVIDER_ID && (
+												<span className="px-1.5 py-0.5 bg-slate-100 text-slate-600 text-[10px] font-medium rounded">
+													Env
 												</span>
 											)}
 										</div>
@@ -378,9 +477,14 @@ const LLMSettingsModal: React.FC<LLMSettingsModalProps> = ({ isOpen, onClose }) 
 										value={editName}
 										onChange={(e) => setEditName(e.target.value)}
 										placeholder="OpenAI"
-										disabled={isSaving}
+										disabled={isSaving || isLegacyProvider}
 										className="w-full px-4 py-2.5 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm disabled:bg-slate-50"
 									/>
+									{isLegacyProvider && (
+										<p className="mt-2 text-xs text-slate-500">
+											当前显示的是 `.env` 或 legacy 配置。保存后会写入 `projs/llm-config.json`。
+										</p>
+									)}
 								</div>
 
 								{/* API Base URL */}

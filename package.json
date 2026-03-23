@@ -6,6 +6,10 @@
   "private": true,
   "scripts": {
     "dev": "PORT=3003 bun run --watch src/server.ts & cd web && bun run dev",
+    "dev:all": "bun run dev",
+    "dev:integrated": "bun run dev",
+    "dev:server": "PORT=3003 bun run --watch src/server.ts",
+    "dev:web": "cd web && bun run dev",
     "build": "cd web && bun run build",
     "build:release": "cd web && bun run build && cd .. && bun build --compile --target=bun --outfile=fastwrite ./src/server.ts",
     "start": "cd web && bun run build && cd .. && bun run src/server.ts",
@@ -15,10 +19,12 @@
     "test:ui": "bunx vitest --ui"
   },
   "dependencies": {
+    "@siglum/engine": "^0.1.4",
+    "lucide-react": "^0.562.0",
     "openai": "^4.77.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
-    "lucide-react": "^0.562.0"
+    "react-pdf": "^10.3.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.1.18",
@@ -31,6 +37,8 @@
     "tailwindcss": "^4.1.18",
     "typescript": "^5.9.3",
     "vite": "^7.3.1",
+    "vite-plugin-top-level-await": "^1.6.0",
+    "vite-plugin-wasm": "^3.5.0",
     "vitest": "^4.0.17"
   }
 }
