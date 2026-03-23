@@ -16,8 +16,6 @@ import { loadGitHubSettings, saveGitHubSettings, cloneRepo, getGitStatus, pushCh
 import { processWithAI, getLLMConfig, saveLLMConfig, getLLMProviders, saveLLMProvider, deleteLLMProvider, setActiveProvider, fetchModelsFromAPI, getProjectPrompts, saveProjectPrompts, loadAICache, saveAICache, DEFAULT_PROMPTS, type LLMProvider, type ProjectPrompts } from "./llmService";
 
 
-import { isEmbeddedAsset, getEmbeddedAsset } from "./embeddedAssets";
-
 const PORT = parseInt(process.env.PORT || "3002", 10);
 const STATIC_DIR = join(import.meta.dir, "../web/dist");
 
@@ -33,6 +31,16 @@ const MIME_TYPES: Record<string, string> = {
   ".woff": "font/woff",
   ".woff2": "font/woff2",
 };
+
+let embeddedAssetsPromise: Promise<typeof import("./embeddedAssets") | null> | null = null;
+
+function loadEmbeddedAssets() {
+  if (!embeddedAssetsPromise) {
+    embeddedAssetsPromise = import("./embeddedAssets").catch(() => null);
+  }
+
+  return embeddedAssetsPromise;
+}
 
 // Shared directory scanning utility
 // Sort: folders first, then files; within each group, natural sort (0-abstract before 1-introduction)
@@ -102,11 +110,13 @@ function json(data: unknown, status = 200) {
   });
 }
 
-function serveStatic(pathname: string): Response | null {
+async function serveStatic(pathname: string): Promise<Response | null> {
   // Try to serve from embedded assets first (for single binary mode)
   const embeddedPath = pathname === "/" ? "/index.html" : pathname;
-  if (isEmbeddedAsset(embeddedPath)) {
-    const assetPath = getEmbeddedAsset(embeddedPath);
+  const embeddedAssets = await loadEmbeddedAssets();
+
+  if (embeddedAssets?.isEmbeddedAsset(embeddedPath)) {
+    const assetPath = embeddedAssets.getEmbeddedAsset(embeddedPath);
     if (assetPath) {
       const ext = extname(embeddedPath);
       const contentType = MIME_TYPES[ext] || "application/octet-stream";
@@ -118,8 +128,8 @@ function serveStatic(pathname: string): Response | null {
   }
 
   // SPA fallback - serve index.html for unknown paths
-  if (!embeddedPath.startsWith("/assets/") && !embeddedPath.includes(".") && isEmbeddedAsset("/index.html")) {
-    const indexPath = getEmbeddedAsset("/index.html");
+  if (!embeddedPath.startsWith("/assets/") && !embeddedPath.includes(".") && embeddedAssets?.isEmbeddedAsset("/index.html")) {
+    const indexPath = embeddedAssets.getEmbeddedAsset("/index.html");
     if (indexPath) {
       return new Response(Bun.file(indexPath), {
         headers: { "Content-Type": "text/html" },
@@ -182,12 +192,14 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     return success ? json({ success: true }) : json({ error: "Project not found" }, 404);
   },
 
-  "GET:/api/projects/:id/ai-cache": async (_req, params) => {
+  "GET:/api/projects/:id/ai-cache": async (req, params) => {
     const projectId = params[0];
     if (!projectId) return json({ error: "Project ID required" }, 400);
     const config = await getProjectConfig(projectId);
     if (!config) return json({ error: "Project not found" }, 404);
-    const cache = await loadAICache(config.sectionsDir);
+    const scope = new URL(req.url).searchParams.get("scope");
+    const cacheFileName = scope === "chat" ? "chat-cache.json" : "ai-cache.json";
+    const cache = await loadAICache(config.sectionsDir, cacheFileName);
     return json(cache);
   },
 
@@ -196,8 +208,10 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     if (!projectId) return json({ error: "Project ID required" }, 400);
     const config = await getProjectConfig(projectId);
     if (!config) return json({ error: "Project not found" }, 404);
+    const scope = new URL(req.url).searchParams.get("scope");
+    const cacheFileName = scope === "chat" ? "chat-cache.json" : "ai-cache.json";
     const body = await req.json() as Record<string, any[]>;
-    await saveAICache(config.sectionsDir, body);
+    await saveAICache(config.sectionsDir, body, cacheFileName);
     return json({ success: true });
   },
 
@@ -1402,7 +1416,7 @@ const appFetch = async (req: Request) => {
   }
 
   // Static files
-  const staticResponse = serveStatic(url.pathname);
+  const staticResponse = await serveStatic(url.pathname);
   if (staticResponse) {
     return staticResponse;
   }
