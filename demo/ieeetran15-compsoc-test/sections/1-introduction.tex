@@ -1,0 +1,21 @@
+\section{Introduction}
+
+The rise of generative AI has transformed academic writing; however, for researchers in computer systems and security, this transition remains challenging.
+
+\subsection{The Challenge}
+
+Top-tier systems and security venues—such as IEEE S\&P, OSDI, USENIX Security, and CCS—demand rigorous logical flow, an authoritative tone, and precise technical terminology. Yet existing collaborative writing platforms like Overleaf lack integration with domain-aware AI assistants capable of enforcing these standards. As a result, authors face a stark trade-off: sacrificing writing quality for collaborative efficiency or vice versa.
+
+Generic large language models (LLMs) do not resolve this tension. They often produce verbose or hallucinated content, imposing substantial manual verification costs. Moreover, uploading unpublished drafts to external, cloud-hosted LLM providers introduces unacceptable risks to data privacy and sovereignty. These challenges call for a secure, context-aware assistant that integrates directly into the LaTeX workflow—ensuring technical accuracy and structural rigor while preserving confidentiality.
+
+\subsection{Our Solution: FastWrite}
+To address these challenges, we introduce \textbf{FastWrite}, a privacy-focused, local-first LaTeX editor.
+FastWrite bridges the gap between traditional editors and modern AI capabilities.
+Unlike plugins that merely overlay text, FastWrite parses the LaTeX structure to offer context-aware suggestions.
+Our contributions are as follows:
+
+\begin{itemize}
+    \item \textbf{Deep LaTeX Integration:} FastWrite understands sections, figures, and citations, ensuring that AI suggestions are syntactically correct and contextually relevant.
+    \item \textbf{Granular AI Modes:} We propose three distinct interaction modes---Diagnose, Refine, and QuickFix---tailored to different stages of the writing process.
+    \item \textbf{Local-First Architecture:} By running the backend locally, FastWrite ensures that the full paper draft never leaves the user's machine unless explicitly sent to an LLM provider for processing specific segments.
+\end{itemize}

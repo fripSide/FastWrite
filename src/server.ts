@@ -14,9 +14,21 @@ import {
 } from "./projectConfig";
 import { loadGitHubSettings, saveGitHubSettings, cloneRepo, getGitStatus, pushChanges } from "./githubService";
 import { processWithAI, getLLMConfig, saveLLMConfig, getLLMProviders, saveLLMProvider, deleteLLMProvider, setActiveProvider, fetchModelsFromAPI, getProjectPrompts, saveProjectPrompts, loadAICache, saveAICache, DEFAULT_PROMPTS, type LLMProvider, type ProjectPrompts } from "./llmService";
+import { installPackagesFromCompileLog, preparePackagesForSource, type PackageInstallProgress } from "./latexAutoPackages";
 
+type EmbeddedAssetsModule = typeof import("./embeddedAssets");
 
-import { isEmbeddedAsset, getEmbeddedAsset } from "./embeddedAssets";
+let embeddedAssets: EmbeddedAssetsModule | null = null;
+const latexPackageTasks = new Map<string, PackageInstallProgress & { updatedAt: number }>();
+
+try {
+  embeddedAssets = await import("./embeddedAssets");
+} catch (error) {
+  console.warn(
+    "[server] Embedded web assets unavailable, falling back to filesystem/static dev mode:",
+    error instanceof Error ? error.message : String(error)
+  );
+}
 
 const PORT = parseInt(process.env.PORT || "3002", 10);
 const STATIC_DIR = join(import.meta.dir, "../web/dist");
@@ -102,11 +114,18 @@ function json(data: unknown, status = 200) {
   });
 }
 
+function updateLatexPackageTask(taskId: string, progress: PackageInstallProgress) {
+  latexPackageTasks.set(taskId, {
+    ...progress,
+    updatedAt: Date.now(),
+  });
+}
+
 function serveStatic(pathname: string): Response | null {
   // Try to serve from embedded assets first (for single binary mode)
   const embeddedPath = pathname === "/" ? "/index.html" : pathname;
-  if (isEmbeddedAsset(embeddedPath)) {
-    const assetPath = getEmbeddedAsset(embeddedPath);
+  if (embeddedAssets?.isEmbeddedAsset(embeddedPath)) {
+    const assetPath = embeddedAssets.getEmbeddedAsset(embeddedPath);
     if (assetPath) {
       const ext = extname(embeddedPath);
       const contentType = MIME_TYPES[ext] || "application/octet-stream";
@@ -118,8 +137,8 @@ function serveStatic(pathname: string): Response | null {
   }
 
   // SPA fallback - serve index.html for unknown paths
-  if (!embeddedPath.startsWith("/assets/") && !embeddedPath.includes(".") && isEmbeddedAsset("/index.html")) {
-    const indexPath = getEmbeddedAsset("/index.html");
+  if (!embeddedPath.startsWith("/assets/") && !embeddedPath.includes(".") && embeddedAssets?.isEmbeddedAsset("/index.html")) {
+    const indexPath = embeddedAssets.getEmbeddedAsset("/index.html");
     if (indexPath) {
       return new Response(Bun.file(indexPath), {
         headers: { "Content-Type": "text/html" },
@@ -491,6 +510,17 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
           if (config.apiKey === masked) {
             console.log(`Using stored API key for testing provider ${storedProvider.name}`);
             effectiveApiKey = storedProvider.apiKey;
+          }
+        }
+      }
+
+      if (config.apiKey.includes('...') && !config.providerId) {
+        const currentConfig = getLLMConfig();
+        if (currentConfig.apiKey) {
+          const masked = `${currentConfig.apiKey.substring(0, 8)}...${currentConfig.apiKey.substring(currentConfig.apiKey.length - 4)}`;
+          if (config.apiKey === masked) {
+            console.log("Using current legacy/env API key for connection test");
+            effectiveApiKey = currentConfig.apiKey;
           }
         }
       }
@@ -1001,6 +1031,56 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
     } catch (error) {
       return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
     }
+  },
+
+  "POST:/api/latex/packages/prepare": async (req) => {
+    try {
+      const { mainTexPath, taskId } = await req.json() as { mainTexPath: string; taskId?: string };
+      if (!mainTexPath) {
+        return json({ error: 'mainTexPath is required' }, 400);
+      }
+      if (!existsSync(mainTexPath)) {
+        return json({ error: 'Main TeX file not found' }, 404);
+      }
+
+      const result = await preparePackagesForSource(
+        mainTexPath,
+        taskId ? (progress) => updateLatexPackageTask(taskId, progress) : undefined
+      );
+      return json({ success: true, ...result });
+    } catch (error) {
+      return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "POST:/api/latex/packages/install-from-log": async (req) => {
+    try {
+      const { log, taskId, mainTexPath } = await req.json() as { log: string; taskId?: string; mainTexPath?: string };
+      if (!log) {
+        return json({ error: 'log is required' }, 400);
+      }
+
+      const result = await installPackagesFromCompileLog(
+        log,
+        mainTexPath,
+        taskId ? (progress) => updateLatexPackageTask(taskId, progress) : undefined
+      );
+      return json({ success: true, ...result });
+    } catch (error) {
+      return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
+    }
+  },
+
+  "GET:/api/latex/packages/progress/:taskId": async (_req, params) => {
+    const taskId = params[0];
+    if (!taskId) {
+      return json({ error: 'taskId is required' }, 400);
+    }
+    const progress = latexPackageTasks.get(taskId);
+    if (!progress) {
+      return json({ stage: 'analyzing', pendingPackages: [], currentPackage: null, installedPackages: [], totalPackages: 0, completedPackages: 0, updatedAt: 0 });
+    }
+    return json(progress);
   },
 
   "POST:/api/latex/save-pdf/:projectId": async (req, params) => {

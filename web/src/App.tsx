@@ -27,6 +27,24 @@ function App() {
     }
   }, [toast]);
 
+  useEffect(() => {
+    const handleSaveShortcut = (event: KeyboardEvent) => {
+      const isSaveKey = event.key.toLowerCase() === 's';
+      const hasPrimaryModifier = event.metaKey || event.ctrlKey;
+      if (!isSaveKey || !hasPrimaryModifier) {
+        return;
+      }
+
+      event.preventDefault();
+      mainEditorRef.current?.save().catch((error) => {
+        console.error('Manual save failed:', error);
+      });
+    };
+
+    window.addEventListener('keydown', handleSaveShortcut);
+    return () => window.removeEventListener('keydown', handleSaveShortcut);
+  }, []);
+
 
 
   // Resizable panel widths
@@ -39,6 +57,10 @@ function App() {
   // Refs for sync coordination
   const mainEditorRef = useRef<MainEditorRef>(null);
   const pdfViewerRef = useRef<PDFViewerRef>(null);
+
+  const handleEditorSaveSuccess = useCallback(() => {
+    pdfViewerRef.current?.compile();
+  }, []);
 
   const loadProjects = async (): Promise<void> => {
     try {
@@ -361,7 +383,7 @@ function App() {
             selectedProject={selectedProject}
             scrollToLine={scrollToLine}
             onSyncToPDF={(page, x, y) => setPdfScrollTarget({ page, x, y })} // Pass sync handler
-            onSaveSuccess={() => pdfViewerRef.current?.compile()}
+            onSaveSuccess={handleEditorSaveSuccess}
           />
         </div>
 

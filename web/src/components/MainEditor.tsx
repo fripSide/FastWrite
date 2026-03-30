@@ -9,6 +9,7 @@ import { api } from '../api';
 export interface MainEditorRef {
   getCurrentLine: () => number;
   getSelectedLineCount: () => number;
+  save: () => Promise<void>;
 }
 
 interface MainEditorProps {
@@ -43,33 +44,44 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null);
   const pendingContentRef = useRef<string>('');
   const displayedFilePathRef = useRef<string | null>(null);
+  const selectedFileRef = useRef<SelectedFile | null>(null);
+  const selectedProjectRef = useRef<SelectedProject | null>(null);
+  const onSaveSuccessRef = useRef<MainEditorProps['onSaveSuccess']>(onSaveSuccess);
 
   // AI Cache Persistence
   const [aiHistories, setAiHistories] = useState<Record<string, ChatMessage[]>>({});
   const [isHistoryLoaded, setIsHistoryLoaded] = useState(false);
   const aiSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  useEffect(() => {
+    selectedFileRef.current = selectedFile;
+    selectedProjectRef.current = selectedProject;
+    onSaveSuccessRef.current = onSaveSuccess;
+  }, [selectedFile, selectedProject, onSaveSuccess]);
+
   // Debounced save for Content
   const debouncedSave = useCallback(async () => {
-    if (!selectedFile || !selectedProject) return;
+    const currentFile = selectedFileRef.current;
+    const currentProject = selectedProjectRef.current;
+    if (!currentFile || !currentProject) return;
 
     setSaveStatus('saving');
     try {
       await api.writeFile(
-        selectedFile.path,
+        currentFile.path,
         pendingContentRef.current,
-        selectedProject.project.id,
+        currentProject.project.id,
         true
       );
       setSaveStatus('saved');
       setIsDirty(false);
       setTimeout(() => setSaveStatus('idle'), 2000);
-      if (onSaveSuccess) onSaveSuccess();
+      onSaveSuccessRef.current?.();
     } catch (error) {
       console.error('Auto-save failed:', error);
       setSaveStatus('idle');
     }
-  }, [selectedFile, selectedProject, onSaveSuccess]);
+  }, []);
 
   // Load AI Cache
   useEffect(() => {
@@ -171,8 +183,18 @@ const MainEditor = forwardRef<MainEditorRef, MainEditorProps>(({ selectedFile, s
     getSelectedLineCount: () => {
       if (selectedItem?.content) return selectedItem.content.split('\n').length;
       return 1;
+    },
+    save: async () => {
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      if (!isDirty) {
+        return;
+      }
+      await debouncedSave();
     }
-  }));
+  }), [selectedItem, focusedItemId, items, isDirty, debouncedSave]);
 
   // Handle scroll to line from PDF sync
   useEffect(() => {

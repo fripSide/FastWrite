@@ -3,7 +3,7 @@
  * Singleton wrapper around SiglumCompiler.
  */
 
-import { SiglumCompiler, createBatchedLogger } from '@siglum/engine';
+import { SiglumCompiler } from '@siglum/engine';
 
 export interface CompileOptions {
     engine?: string;
@@ -25,7 +25,14 @@ const CDN_BASE = 'https://cdn.siglum.org/tl2025';
 let compiler: SiglumCompiler | null = null;
 let initPromise: Promise<void> | null = null;
 let logMessages: string[] = [];
-let localPackagesLoaded = false;
+let localResourcesLoaded = false;
+const RESOURCE_FETCH_CONCURRENCY = 24;
+const RESOURCE_FETCH_RETRIES = 2;
+const SKIPPED_LOCAL_MAP_PATHS = new Set([
+    '/texlive/texmf-dist/fonts/map/dvips/mt11p/mt11p.map',
+    '/texlive/texmf-dist/fonts/map/dvips/mtpro2/mtpro2.map',
+    '/texlive/texmf-dist/dvips/mtpro2/mtpro2.map',
+]);
 
 /** Get or create the singleton compiler instance */
 function getCompiler(): SiglumCompiler {
@@ -38,10 +45,14 @@ function getCompiler(): SiglumCompiler {
             enableLazyFS: true,    // Lazy load for faster startup
             enableDocCache: true,  // Cache compiled PDFs by preamble hash
             verbose: true,         // Enable verbose for debugging
-            eagerBundles: ['extra-misc', 'tex-latex-misc'], // Force load extra + commonly used packages (geometry, natbib, etc.)
-            onLog: createBatchedLogger((msgs: string[]) => {
-                logMessages.push(...msgs);
-            }),
+            eagerBundles: {
+                pdflatex: ['extra-misc', 'tex-latex-misc'],
+                xelatex: ['extra-misc', 'tex-latex-misc', 'fonts-lm-type1'],
+                lualatex: ['extra-misc', 'tex-latex-misc', 'fonts-lm-type1'],
+            }, // Force load common extras; Xe/LuaTeX also need LM Type1 for xdvipdfmx/pdf output fallback
+            onLog: (msg: string) => {
+                logMessages.push(msg);
+            },
             onProgress: (stage: string, detail: string) => {
                 console.log(`[LaTeX] ${stage}: ${detail}`);
             },
@@ -57,42 +68,79 @@ function getCompiler(): SiglumCompiler {
  * bundles. Files are loaded once at init and passed to the worker on every
  * compile via the ctanFiles mechanism.
  */
-async function loadLocalPackages(c: SiglumCompiler): Promise<void> {
-    if (localPackagesLoaded) return;
-    try {
-        const resp = await fetch('/local-packages/manifest.json');
-        if (!resp.ok) {
-            console.warn('[LaTeX] No local packages manifest found');
-            return;
-        }
-        const manifest: Record<string, { localPath: string; size: number }> = await resp.json();
-        const entries = Object.entries(manifest);
-        console.log(`[LaTeX] Loading ${entries.length} local package files...`);
+async function loadManifestResources(
+    manifestUrl: string,
+    label: string,
+    c: SiglumCompiler
+): Promise<number> {
+    const resp = await fetch(manifestUrl);
+    if (!resp.ok) {
+        console.warn(`[LaTeX] No ${label} manifest found`);
+        return 0;
+    }
 
-        // Fetch all files in parallel
-        const results = await Promise.allSettled(
-            entries.map(async ([texPath, info]) => {
-                const resp = await fetch('/' + info.localPath);
-                if (!resp.ok) throw new Error(`Failed to fetch ${info.localPath}: ${resp.status}`);
-                const data = new Uint8Array(await resp.arrayBuffer());
+    const manifest: Record<string, { localPath: string; size: number }> = await resp.json();
+    const entries = Object.entries(manifest).filter(([texPath]) => !SKIPPED_LOCAL_MAP_PATHS.has(texPath));
+    console.log(`[LaTeX] Loading ${entries.length} ${label} files...`);
+
+    const fetchResource = async (texPath: string, localPath: string): Promise<{ texPath: string; data: Uint8Array }> => {
+        let lastError: Error | null = null;
+        for (let attempt = 0; attempt <= RESOURCE_FETCH_RETRIES; attempt++) {
+            try {
+                const fileResp = await fetch('/' + localPath);
+                if (!fileResp.ok) {
+                    throw new Error(`HTTP ${fileResp.status}`);
+                }
+                const data = new Uint8Array(await fileResp.arrayBuffer());
                 return { texPath, data };
-            })
-        );
-
-        // Inject into ctanFetcher.fileCache (the internal Map that getCachedFiles() reads)
-        const fetcher = (c as any).ctanFetcher;
-        let loaded = 0;
-        for (const r of results) {
-            if (r.status === 'fulfilled') {
-                fetcher.fileCache.set(r.value.texPath, r.value.data);
-                loaded++;
+            } catch (error) {
+                lastError = error instanceof Error ? error : new Error(String(error));
+                if (attempt < RESOURCE_FETCH_RETRIES) {
+                    await new Promise((resolve) => setTimeout(resolve, 100 * (attempt + 1)));
+                }
             }
         }
+        throw new Error(`Failed to fetch ${localPath}: ${lastError?.message ?? 'unknown error'}`);
+    };
 
-        console.log(`[LaTeX] Loaded ${loaded}/${entries.length} local package files`);
-        localPackagesLoaded = true;
+    const results: PromiseSettledResult<{ texPath: string; data: Uint8Array }>[] = [];
+    for (let i = 0; i < entries.length; i += RESOURCE_FETCH_CONCURRENCY) {
+        const batch = entries.slice(i, i + RESOURCE_FETCH_CONCURRENCY);
+        const batchResults = await Promise.allSettled(
+            batch.map(([texPath, info]) => fetchResource(texPath, info.localPath))
+        );
+        results.push(...batchResults);
+    }
+
+    const fetcher = (c as any).ctanFetcher;
+    let loaded = 0;
+    const failed: string[] = [];
+    for (const r of results) {
+        if (r.status === 'fulfilled') {
+            fetcher.fileCache.set(r.value.texPath, r.value.data);
+            loaded++;
+        } else {
+            failed.push(r.reason instanceof Error ? r.reason.message : String(r.reason));
+        }
+    }
+
+    console.log(`[LaTeX] Loaded ${loaded}/${entries.length} ${label} files`);
+    if (failed.length > 0) {
+        console.warn(
+            `[LaTeX] Failed to load ${failed.length} ${label} files. ` +
+            `First failures: ${failed.slice(0, 10).join(' | ')}`
+        );
+    }
+    return loaded;
+}
+
+async function loadLocalResources(c: SiglumCompiler): Promise<void> {
+    if (localResourcesLoaded) return;
+    try {
+        await loadManifestResources('/local-packages/manifest.json', 'local package', c);
+        localResourcesLoaded = true;
     } catch (e) {
-        console.warn('[LaTeX] Failed to load local packages:', e);
+        console.warn('[LaTeX] Failed to load local resources:', e);
     }
 }
 
@@ -102,7 +150,7 @@ export async function init(): Promise<void> {
         const c = getCompiler();
         initPromise = (async () => {
             await c.init();
-            await loadLocalPackages(c);
+            await loadLocalResources(c);
         })().catch((err) => {
             console.error('[LaTeX] Failed to initialize compiler:', err);
             initPromise = null; // Allow retry
@@ -142,9 +190,13 @@ export async function compile(
     const c = getCompiler();
     const result = await c.compile(source, options);
 
-    // Append captured logs to result
-    if (logMessages.length > 0 && !result.log) {
-        (result as any).log = logMessages.join('\n');
+    const capturedLog = logMessages.join('\n');
+    if (capturedLog) {
+        if (result.log && result.log !== capturedLog) {
+            (result as any).log = `${capturedLog}\n${result.log}`;
+        } else if (!result.log) {
+            (result as any).log = capturedLog;
+        }
     }
 
     return result;
@@ -168,5 +220,6 @@ export function unload(): void {
         compiler.unload();
         compiler = null;
         initPromise = null;
+        localResourcesLoaded = false;
     }
 }

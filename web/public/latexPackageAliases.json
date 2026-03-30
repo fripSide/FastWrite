@@ -1,0 +1,34 @@
+{
+    "mathtime.sty": {
+        "package": "mathtime",
+        "downloadUrl": "https://mirrors.ctan.org/macros/latex/contrib/psnfssx/mathtime.zip"
+    },
+    "ptmr8t.tfm": {
+        "package": "psnfss",
+        "downloadUrl": "https://mirrors.ctan.org/macros/latex/required/psnfss.zip"
+    },
+    "ptmr7t.tfm": {
+        "package": "psnfss",
+        "downloadUrl": "https://mirrors.ctan.org/macros/latex/required/psnfss.zip"
+    },
+    "algorithm.sty": {
+        "package": "algorithms",
+        "downloadUrl": "https://mirrors.ctan.org/macros/latex/contrib/algorithms.zip"
+    },
+    "algorithmic.sty": {
+        "package": "algorithms",
+        "downloadUrl": "https://mirrors.ctan.org/macros/latex/contrib/algorithms.zip"
+    },
+    "algorithmicx.sty": {
+        "package": "algorithmicx",
+        "downloadUrl": "https://mirrors.ctan.org/macros/latex/contrib/algorithmicx.zip"
+    },
+    "algpseudocode.sty": {
+        "package": "algorithmicx",
+        "downloadUrl": "https://mirrors.ctan.org/macros/latex/contrib/algorithmicx.zip"
+    },
+    "libertine.sty": {
+        "package": "libertine",
+        "downloadUrl": "https://ctan.org/tex-archive/fonts/libertine.zip"
+    }
+}
