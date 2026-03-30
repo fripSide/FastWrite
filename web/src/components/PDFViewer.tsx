@@ -28,6 +28,7 @@ interface CompilationResult {
 interface PackageInstallError {
 	packageName: string;
 	requestedFiles: string[];
+	errorCode?: string;
 	reason: string;
 }
 
@@ -38,6 +39,16 @@ interface PackageInstallApiResult {
 	unresolvedFiles?: string[];
 	bundleHintPackages?: string[];
 	packageErrors?: PackageInstallError[];
+	logRetryInstallEnabled?: boolean;
+}
+
+interface PackageInstallProgress {
+	stage: 'analyzing' | 'resolving' | 'downloading' | 'installing' | 'completed';
+	pendingPackages: string[];
+	currentPackage: string | null;
+	installedPackages: string[];
+	totalPackages: number;
+	completedPackages: number;
 }
 
 interface LatexStatus {
@@ -63,6 +74,7 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 	const [pdfUrl, setPdfUrl] = useState<string | null>(null);
 	const [isCompiling, setIsCompiling] = useState(false);
 	const [compilationError, setCompilationError] = useState<string | null>(null);
+	const [packageProgress, setPackageProgress] = useState<PackageInstallProgress | null>(null);
 	const [errorCount, setErrorCount] = useState<number>(0);
 	const [showErrorLog, setShowErrorLog] = useState(false);
 	const [latexStatus, setLatexStatus] = useState<LatexStatus | null>(null);
@@ -73,16 +85,105 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 	const [wasmReady, setWasmReady] = useState(false);
 	const [wasmInitError, setWasmInitError] = useState<string | null>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
+	const progressPollRef = useRef<number | null>(null);
 	const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map());
 	const pageHeightsRef = useRef<Map<number, number>>(new Map());
 	const pdfBlobUrlRef = useRef<string | null>(null); // Track blob URLs for cleanup
+	const compileRequestIdRef = useRef(0);
+	const latestProjectIdRef = useRef(projectId);
+	const latestMainTexPathRef = useRef(mainTexPath);
 
 	const isBrowserMode = !compilerMode || compilerMode === 'browser-wasm';
+
+	useEffect(() => {
+		latestProjectIdRef.current = projectId;
+		latestMainTexPathRef.current = mainTexPath;
+	}, [projectId, mainTexPath]);
 
 	const reinitializeBrowserCompiler = useCallback(async () => {
 		latexCompiler.unload();
 		await latexCompiler.init();
 		setWasmReady(true);
+	}, []);
+
+	const stopProgressPolling = useCallback(() => {
+		if (progressPollRef.current !== null) {
+			window.clearInterval(progressPollRef.current);
+			progressPollRef.current = null;
+		}
+	}, []);
+
+	useEffect(() => {
+		compileRequestIdRef.current += 1;
+		stopProgressPolling();
+		setPackageProgress(null);
+		setCompilationError(null);
+		setErrorCount(0);
+		setNumPages(0);
+		setCurrentPage(1);
+		setPageInputValue('1');
+		if (pdfBlobUrlRef.current) {
+			URL.revokeObjectURL(pdfBlobUrlRef.current);
+			pdfBlobUrlRef.current = null;
+		}
+		setPdfUrl(null);
+	}, [projectId, mainTexPath, stopProgressPolling]);
+
+	const startProgressPolling = useCallback((taskId: string) => {
+		stopProgressPolling();
+		const poll = async () => {
+			try {
+				const response = await fetch(`/api/latex/packages/progress/${encodeURIComponent(taskId)}`);
+				if (!response.ok) return;
+				const progress = await response.json() as PackageInstallProgress;
+				setPackageProgress(progress);
+				if (progress.stage === 'completed') {
+					stopProgressPolling();
+				}
+			} catch {
+				// ignore transient polling failures
+			}
+		};
+		void poll();
+		progressPollRef.current = window.setInterval(() => {
+			void poll();
+		}, 300);
+	}, [stopProgressPolling]);
+
+	const withPackageProgress = useCallback(async <T,>(requestFactory: (taskId: string) => Promise<T>) => {
+		const taskId = (globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`);
+		setPackageProgress({
+			stage: 'analyzing',
+			pendingPackages: [],
+			currentPackage: null,
+			installedPackages: [],
+			totalPackages: 0,
+			completedPackages: 0,
+		});
+		startProgressPolling(taskId);
+		try {
+			return await requestFactory(taskId);
+		} finally {
+			window.setTimeout(() => {
+				stopProgressPolling();
+			}, 500);
+		}
+	}, [startProgressPolling, stopProgressPolling]);
+
+	const appendCompilationError = useCallback((message: string) => {
+		const nextMessage = message.trim();
+		if (!nextMessage) {
+			return;
+		}
+		setCompilationError((prev) => {
+			if (!prev) {
+				return nextMessage;
+			}
+			if (prev.includes(nextMessage)) {
+				return prev;
+			}
+			return `${prev}\n\n---\n\n${nextMessage}`;
+		});
 	}, []);
 
 	const formatPackageErrors = useCallback((packageErrors: PackageInstallError[]) => {
@@ -185,46 +286,60 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 			if (pdfBlobUrlRef.current) {
 				URL.revokeObjectURL(pdfBlobUrlRef.current);
 			}
+			stopProgressPolling();
 		};
-	}, [isBrowserMode]);
+	}, [isBrowserMode, stopProgressPolling]);
 
 	// Compile LaTeX — branches on isBrowserMode
 	const compile = useCallback(async () => {
 		if (!mainTexPath) return;
 		if (!isBrowserMode && !latexStatus?.installed) return;
 		if (isBrowserMode && !wasmReady) return;
+		const compileRequestId = ++compileRequestIdRef.current;
+		const isStale = () =>
+			compileRequestId !== compileRequestIdRef.current ||
+			latestProjectIdRef.current !== projectId ||
+			latestMainTexPathRef.current !== mainTexPath;
 
 		setIsCompiling(true);
 		setCompilationError(null);
 		setErrorCount(0);
+		setPackageProgress(null);
 
 		try {
 			if (isBrowserMode) {
 				// === Browser WASM compilation ===
-				const prepareResponse = await fetch('/api/latex/packages/prepare', {
+				const prepareResponse = await withPackageProgress((taskId) => fetch('/api/latex/packages/prepare', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ mainTexPath })
-				});
+					body: JSON.stringify({ mainTexPath, taskId })
+				}));
 				let prepareResult: PackageInstallApiResult | null = null;
-				if (prepareResponse.ok) {
-					prepareResult = await prepareResponse.json() as PackageInstallApiResult;
-					if ((prepareResult.packageErrors?.length || 0) > 0) {
-						const errorMessage = formatPackageErrors(prepareResult.packageErrors || []);
-						setCompilationError(errorMessage);
-						setErrorCount(Math.max(1, prepareResult.packageErrors?.length || 1));
-						return;
-					}
-					if ((prepareResult.installedPackages?.length || 0) > 0 || prepareResult.manifestUpdated) {
-						await reinitializeBrowserCompiler();
-					}
+				if (!prepareResponse.ok) {
+					const message = await prepareResponse.text();
+					if (isStale()) return;
+					appendCompilationError(`Package preparation failed: ${message || prepareResponse.statusText}`);
+					setErrorCount(1);
+					return;
+				}
+				prepareResult = await prepareResponse.json() as PackageInstallApiResult;
+				if (isStale()) return;
+				if ((prepareResult.packageErrors?.length || 0) > 0) {
+					const errorMessage = formatPackageErrors(prepareResult.packageErrors || []);
+					appendCompilationError(errorMessage);
+					setErrorCount(Math.max(1, prepareResult.packageErrors?.length || 1));
+				}
+				if ((prepareResult.installedPackages?.length || 0) > 0 || prepareResult.manifestUpdated) {
+					await reinitializeBrowserCompiler();
 				}
 
 				// 1. Fetch the main .tex source
 				const srcRes = await fetch(`/api/files/${encodeURIComponent(mainTexPath)}?projectId=${encodeURIComponent(projectId)}`);
 				if (!srcRes.ok) throw new Error('Failed to fetch .tex source');
 				const srcData = await srcRes.json() as { content: string };
+				if (isStale()) return;
 				const hintedPackages = new Set<string>(prepareResult?.bundleHintPackages || []);
+				const logRetryInstallEnabled = prepareResult?.logRetryInstallEnabled !== false;
 				let compileSource = injectBundleHintPackages(srcData.content, Array.from(hintedPackages));
 
 				// 2. Fetch all project files for additionalFiles (images, bib, sub-files)
@@ -232,6 +347,7 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 				let additionalFiles: Record<string, string | Uint8Array> = {};
 				if (filesRes.ok) {
 					const filesData = await filesRes.json();
+					if (isStale()) return;
 					const flatFiles = flattenFileTree(filesData.files || []);
 
 					// Fetch text-based supporting files (.tex, .bib, .sty, .cls, .bbl)
@@ -275,20 +391,28 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 					additionalFiles,
 					useCache: !hasAdditional,
 				});
+				if (isStale()) return;
 
-				for (let attempt = 0; attempt < 3 && (!result.success || !result.pdf); attempt++) {
-					const errMsg = result.error || result.log || 'WASM compilation failed';
-					const installResponse = await fetch('/api/latex/packages/install-from-log', {
+				for (let attempt = 0; logRetryInstallEnabled && attempt < 3 && (!result.success || !result.pdf); attempt++) {
+					const errMsg = [result.log, result.error].filter(Boolean).join('\n') || 'WASM compilation failed';
+					const installResponse = await withPackageProgress((taskId) => fetch('/api/latex/packages/install-from-log', {
 						method: 'POST',
 						headers: { 'Content-Type': 'application/json' },
-						body: JSON.stringify({ log: errMsg })
-					});
-					if (!installResponse.ok) break;
+						body: JSON.stringify({ log: errMsg, taskId, mainTexPath })
+					}));
+					if (!installResponse.ok) {
+						const message = await installResponse.text();
+						if (isStale()) return;
+						appendCompilationError(`Package installation failed: ${message || installResponse.statusText}`);
+						setErrorCount(1);
+						return;
+					}
 
 					const installResult = await installResponse.json() as PackageInstallApiResult;
+					if (isStale()) return;
 					if ((installResult.packageErrors?.length || 0) > 0) {
 						const errorMessage = formatPackageErrors(installResult.packageErrors || []);
-						setCompilationError(errorMessage);
+						appendCompilationError(errorMessage);
 						setErrorCount(Math.max(1, installResult.packageErrors?.length || 1));
 						return;
 					}
@@ -306,9 +430,11 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 						additionalFiles,
 						useCache: false,
 					});
+					if (isStale()) return;
 				}
 
 				if (result.success && result.pdf) {
+					if (isStale()) return;
 					// Revoke previous blob URL
 					if (pdfBlobUrlRef.current) {
 						URL.revokeObjectURL(pdfBlobUrlRef.current);
@@ -328,8 +454,9 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 						body: pdfBytes,
 					}).catch(err => console.warn('[PDFViewer] Failed to save PDF to disk:', err));
 				} else {
+					if (isStale()) return;
 					const errMsg = formatCompilationError(result.error || result.log || 'WASM compilation failed');
-					setCompilationError(errMsg);
+					appendCompilationError(errMsg);
 					const errorLines = errMsg.split('\n').filter((l: string) => l.includes('Error') || l.includes('!')).length;
 					setErrorCount(Math.max(1, errorLines));
 				}
@@ -342,23 +469,28 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 				});
 
 				const result = await response.json() as CompilationResult & { warnings?: number };
+				if (isStale()) return;
 
 				if (result.success && result.pdfPath) {
 					setPdfUrl(`/api/latex/pdf/${encodeURIComponent(projectId)}?t=${Date.now()}`);
 					if (result.warnings) setErrorCount(result.warnings);
 				} else {
-					setCompilationError(result.error || 'Compilation failed');
+					appendCompilationError(result.error || 'Compilation failed');
 					const errorLines = (result.error || '').split('\n').filter(l => l.includes('Error') || l.includes('!')).length;
 					setErrorCount(Math.max(1, errorLines));
 				}
 			}
 		} catch (error) {
-			setCompilationError(error instanceof Error ? error.message : 'Compilation failed');
+			if (isStale()) return;
+			appendCompilationError(error instanceof Error ? error.message : 'Compilation failed');
 			setErrorCount(1);
 		} finally {
-			setIsCompiling(false);
+			if (!isStale()) {
+				stopProgressPolling();
+				setIsCompiling(false);
+			}
 		}
-	}, [projectId, mainTexPath, latexStatus?.installed, isBrowserMode, wasmReady, reinitializeBrowserCompiler, formatPackageErrors, formatCompilationError, injectBundleHintPackages]);
+	}, [projectId, mainTexPath, latexStatus?.installed, isBrowserMode, wasmReady, reinitializeBrowserCompiler, formatPackageErrors, formatCompilationError, injectBundleHintPackages, withPackageProgress, stopProgressPolling, appendCompilationError]);
 
 	// Auto-compile when tex path changes
 	useEffect(() => {
@@ -933,6 +1065,31 @@ const PDFViewer = forwardRef<PDFViewerRef, PDFViewerProps>(({ projectId, mainTex
 					<div className="flex flex-col items-center justify-center h-full">
 						<Loader2 size={48} className="animate-spin text-blue-500 mb-3" />
 						<p className="text-sm text-slate-600">Compiling LaTeX...</p>
+						{packageProgress && (
+							<div className="mt-4 w-full max-w-lg rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm">
+								<p className="text-xs font-medium text-slate-700">
+									Package stage: {packageProgress.stage}
+								</p>
+								<p className="mt-1 text-xs text-slate-500">
+									Progress: {packageProgress.completedPackages}/{Math.max(packageProgress.totalPackages, packageProgress.completedPackages)}
+								</p>
+								{packageProgress.currentPackage && (
+									<p className="mt-2 text-sm text-blue-700">
+										Downloading: <span className="font-medium">{packageProgress.currentPackage}</span>
+									</p>
+								)}
+								{packageProgress.pendingPackages.length > 0 && (
+									<p className="mt-2 text-xs text-slate-600 break-words">
+										Pending: {packageProgress.pendingPackages.join(', ')}
+									</p>
+								)}
+								{packageProgress.installedPackages.length > 0 && (
+									<p className="mt-2 text-xs text-emerald-700 break-words">
+										Installed: {packageProgress.installedPackages.join(', ')}
+									</p>
+								)}
+							</div>
+						)}
 					</div>
 				) : pdfUrl ? (
 					<Document

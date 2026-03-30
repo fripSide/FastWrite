@@ -14,11 +14,12 @@ import {
 } from "./projectConfig";
 import { loadGitHubSettings, saveGitHubSettings, cloneRepo, getGitStatus, pushChanges } from "./githubService";
 import { processWithAI, getLLMConfig, saveLLMConfig, getLLMProviders, saveLLMProvider, deleteLLMProvider, setActiveProvider, fetchModelsFromAPI, getProjectPrompts, saveProjectPrompts, loadAICache, saveAICache, DEFAULT_PROMPTS, type LLMProvider, type ProjectPrompts } from "./llmService";
-import { installPackagesFromCompileLog, preparePackagesForSource } from "./latexAutoPackages";
+import { installPackagesFromCompileLog, preparePackagesForSource, type PackageInstallProgress } from "./latexAutoPackages";
 
 type EmbeddedAssetsModule = typeof import("./embeddedAssets");
 
 let embeddedAssets: EmbeddedAssetsModule | null = null;
+const latexPackageTasks = new Map<string, PackageInstallProgress & { updatedAt: number }>();
 
 try {
   embeddedAssets = await import("./embeddedAssets");
@@ -110,6 +111,13 @@ function json(data: unknown, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: { "Content-Type": "application/json" },
+  });
+}
+
+function updateLatexPackageTask(taskId: string, progress: PackageInstallProgress) {
+  latexPackageTasks.set(taskId, {
+    ...progress,
+    updatedAt: Date.now(),
   });
 }
 
@@ -1027,7 +1035,7 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
 
   "POST:/api/latex/packages/prepare": async (req) => {
     try {
-      const { mainTexPath } = await req.json() as { mainTexPath: string };
+      const { mainTexPath, taskId } = await req.json() as { mainTexPath: string; taskId?: string };
       if (!mainTexPath) {
         return json({ error: 'mainTexPath is required' }, 400);
       }
@@ -1035,7 +1043,10 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
         return json({ error: 'Main TeX file not found' }, 404);
       }
 
-      const result = await preparePackagesForSource(mainTexPath);
+      const result = await preparePackagesForSource(
+        mainTexPath,
+        taskId ? (progress) => updateLatexPackageTask(taskId, progress) : undefined
+      );
       return json({ success: true, ...result });
     } catch (error) {
       return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
@@ -1044,16 +1055,32 @@ const handlers: Record<string, (req: Request, params: string[]) => Promise<Respo
 
   "POST:/api/latex/packages/install-from-log": async (req) => {
     try {
-      const { log } = await req.json() as { log: string };
+      const { log, taskId, mainTexPath } = await req.json() as { log: string; taskId?: string; mainTexPath?: string };
       if (!log) {
         return json({ error: 'log is required' }, 400);
       }
 
-      const result = await installPackagesFromCompileLog(log);
+      const result = await installPackagesFromCompileLog(
+        log,
+        mainTexPath,
+        taskId ? (progress) => updateLatexPackageTask(taskId, progress) : undefined
+      );
       return json({ success: true, ...result });
     } catch (error) {
       return json({ success: false, error: error instanceof Error ? error.message : String(error) }, 500);
     }
+  },
+
+  "GET:/api/latex/packages/progress/:taskId": async (_req, params) => {
+    const taskId = params[0];
+    if (!taskId) {
+      return json({ error: 'taskId is required' }, 400);
+    }
+    const progress = latexPackageTasks.get(taskId);
+    if (!progress) {
+      return json({ stage: 'analyzing', pendingPackages: [], currentPackage: null, installedPackages: [], totalPackages: 0, completedPackages: 0, updatedAt: 0 });
+    }
+    return json(progress);
   },
 
   "POST:/api/latex/save-pdf/:projectId": async (req, params) => {
